@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Environment
+.env
+
+# Runtime data
+data/*.db
+chroma_db/
+
+# Model binaries
+models/*.gguf
+
+# OS
+.DS_Store
+Thumbs.db

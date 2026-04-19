@@ -1,0 +1,79 @@
+{
+  "info": {
+    "name": "SEC Investment Assistant API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "GET /health",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health"
+      }
+    },
+    {
+      "name": "GET /api/documents",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/documents"
+      }
+    },
+    {
+      "name": "GET /api/latency/{session_id}",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/latency/{{session_id}}"
+      }
+    },
+    {
+      "name": "GET /api/latency/global",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/latency/global"
+      }
+    },
+    {
+      "name": "WebSocket Chat Test",
+      "request": {
+        "method": "GET",
+        "url": "{{wsUrl}}/ws/{{session_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Use Postman WebSocket request UI with this payload:",
+              "// {\"type\":\"text_input\",\"message\":\"What was Apple's revenue in 2023?\"}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "WebSocket Voice Test",
+      "request": {
+        "method": "GET",
+        "url": "{{wsUrl}}/ws/{{session_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Use Postman WebSocket request UI with this payload:",
+              "// {\"type\":\"audio_input\",\"session_id\":\"<id>\",\"audio\":\"<base64_webm>\",\"format\":\"webm\"}"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {"key": "baseUrl", "value": "http://localhost:8000"},
+    {"key": "wsUrl", "value": "ws://localhost:8000"},
+    {"key": "session_id", "value": "demo-session"}
+  ]
+}
