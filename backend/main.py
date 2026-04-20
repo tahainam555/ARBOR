@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
 from backend.config import get_settings
 from backend.conversation_manager import ConversationManager
@@ -130,6 +131,24 @@ async def on_startup() -> None:
     logger.info("System ready")
     logger.info("Startup component timings (ms): %s", component_times)
     logger.info("Total startup time (ms): %.2f", total_ms)
+
+
+@app.get("/", include_in_schema=False)
+async def root() -> dict[str, Any]:
+    """Simple root endpoint for browser sanity checks."""
+    return {
+        "status": "ok",
+        "service": "SEC Investment Research Assistant backend",
+        "health": "/health",
+        "docs": "/docs",
+        "websocket": "/ws/{session_id}",
+    }
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> Response:
+    """Avoid noisy 404 logs for browser favicon requests."""
+    return Response(status_code=204)
 
 
 @app.get("/health")
