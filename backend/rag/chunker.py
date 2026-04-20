@@ -77,13 +77,15 @@ class SECChunker:
         stem = pdf_path.stem
         parts = stem.split("_")
 
-        if len(parts) < 3:
+        if len(parts) < 2:
             raise ValueError(f"Unexpected filing filename format: {filename}")
 
         ticker = parts[0].upper()
         company = COMPANY_NAMES.get(ticker, ticker)
 
         if parts[1] == "10K":
+            if len(parts) < 3:
+                raise ValueError(f"Unexpected 10-K filename format: {filename}")
             filing_type = "10-K"
             year = parts[2]
         elif parts[1] == "10Q":
@@ -93,6 +95,8 @@ class SECChunker:
             filing_type = "DEF 14A"
             year = "latest"
         else:
+            if len(parts) < 3:
+                raise ValueError(f"Unexpected filing filename format: {filename}")
             filing_type = parts[1]
             year = parts[2]
 
