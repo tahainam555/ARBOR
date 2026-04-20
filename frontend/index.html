@@ -410,11 +410,11 @@
       textInput.value = '';
     }
 
-    function enqueueAudio(base64Audio) {
+    function enqueueAudio(base64Audio, mimeType = 'audio/mpeg') {
       const binary = atob(base64Audio);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const blob = new Blob([bytes], { type: 'audio/mpeg' });
+      const blob = new Blob([bytes], { type: mimeType });
       audioQueue.push(URL.createObjectURL(blob));
       playNextAudio();
     }
@@ -485,7 +485,7 @@
       }
 
       if (msg.type === 'audio_chunk') {
-        enqueueAudio(msg.audio);
+        enqueueAudio(msg.audio, msg.mime_type || 'audio/mpeg');
         return;
       }
 

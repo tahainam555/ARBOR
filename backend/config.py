@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     # Voice
     whisper_model: str = Field(default="base.en", alias="WHISPER_MODEL")
     tts_voice: str = Field(default="en-US-AriaNeural", alias="TTS_VOICE")
+    tts_backend: str = Field(default="auto", alias="TTS_BACKEND")
 
     # RAG
     top_k_chunks: int = Field(default=5, alias="TOP_K_CHUNKS")

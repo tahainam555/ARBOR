@@ -4,6 +4,7 @@ llama-cpp-python==0.2.90
 # Voice
 faster-whisper==1.0.3
 edge-tts==6.1.9
+pyttsx3==2.90
 soundfile==0.12.1
 numpy==1.26.4
 
