@@ -77,8 +77,24 @@ class ToolOrchestrator:
             if ticker:
                 detected.append({"tool": "stock_price", "params": {"ticker": ticker}})
 
-        calc_patterns = ["calculate", "roi", "cagr", "compound", "break even", "what is"]
-        if any(pattern in lower for pattern in calc_patterns):
+        calc_patterns = [
+            "calculate roi",
+            "roi",
+            "cagr",
+            "compound interest",
+            "break even",
+            "pe ratio",
+            "dividend yield",
+            "portfolio value",
+            "future value",
+            "if i bought",
+            "if i invest",
+        ]
+        has_calculator_intent = any(pattern in lower for pattern in calc_patterns)
+        if "calculate" in lower and re.search(r"\d", message):
+            has_calculator_intent = True
+
+        if has_calculator_intent:
             detected.append({"tool": "calculator", "params": self._infer_calculator_params(message)})
 
         news_patterns = ["news about", "latest on", "recent news", "what happened with"]
@@ -99,6 +115,33 @@ class ToolOrchestrator:
             )
 
         return detected
+
+    @staticmethod
+    def _should_try_llm_detection(message: str) -> bool:
+        """Gate LLM intent detection to likely tool requests only for lower latency."""
+        lower = message.lower()
+        hints = (
+            "price",
+            "trading",
+            "ticker",
+            "tool",
+            "news",
+            "headline",
+            "latest",
+            "update",
+            "calculate",
+            "roi",
+            "cagr",
+            "compound",
+            "break even",
+            "dividend",
+            "profile",
+            "watchlist",
+            "remember me",
+            "my account",
+            "portfolio",
+        )
+        return any(hint in lower for hint in hints)
 
     @staticmethod
     def _infer_calculator_params(message: str) -> dict[str, Any]:
@@ -152,6 +195,9 @@ class ToolOrchestrator:
     async def _llm_based_detection(self, message: str) -> list[dict[str, Any]]:
         """Fallback intent detection for ambiguous requests using LLM JSON output."""
         if self.llm_intent_detector is None:
+            return []
+
+        if not self._should_try_llm_detection(message):
             return []
 
         prompt = (

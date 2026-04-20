@@ -39,6 +39,11 @@ class RAGRetriever:
         vector = await asyncio.to_thread(self.embedding_model.encode, query)
         return vector.tolist() if hasattr(vector, "tolist") else list(vector)
 
+    async def warmup(self) -> None:
+        """Prime embedding and vector query paths to lower first-turn latency."""
+        embedding = await self._embed_query("sec filing warmup query")
+        await self.retrieve_with_embedding(query_embedding=embedding, top_k=1)
+
     @staticmethod
     def _build_where(filter_ticker: str | None, filter_year: str | None) -> dict | None:
         """Build optional ChromaDB metadata filter object."""

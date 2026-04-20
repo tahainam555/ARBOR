@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import time
@@ -106,6 +107,25 @@ async def on_startup() -> None:
         crm_tool=crm_tool,
     )
 
+    async def _run_warmup(name: str, coro: Any) -> tuple[str, float, str | None]:
+        warmup_start = time.perf_counter()
+        try:
+            await coro
+            return name, (time.perf_counter() - warmup_start) * 1000.0, None
+        except Exception as exc:  # noqa: BLE001
+            return name, (time.perf_counter() - warmup_start) * 1000.0, str(exc)
+
+    warmup_results = await asyncio.gather(
+        _run_warmup("retriever", retriever.warmup()),
+        _run_warmup("transcriber", transcriber.warmup()),
+        _run_warmup("llm_engine", llm_engine.warmup()),
+    )
+
+    for name, duration_ms, error in warmup_results:
+        component_times[f"warmup_{name}"] = duration_ms
+        if error:
+            logger.warning("Warmup failed for %s: %s", name, error)
+
     total_ms = (time.perf_counter() - start) * 1000.0
     logger.info("System ready")
     logger.info("Startup component timings (ms): %s", component_times)
@@ -116,7 +136,7 @@ async def on_startup() -> None:
 async def health() -> dict[str, Any]:
     """Health endpoint with model and index visibility."""
     indexer: SECIndexer = app.state.indexer
-    docs = indexer.get_indexed_documents()
+    docs = await asyncio.to_thread(indexer.get_indexed_documents)
     return {
         "status": "ok",
         "model_loaded": bool(getattr(app.state, "model_loaded", False)),
@@ -149,7 +169,7 @@ async def get_global_latency() -> dict[str, Any]:
 async def list_documents() -> dict[str, Any]:
     """List indexed documents and chunk counts."""
     indexer: SECIndexer = app.state.indexer
-    docs = indexer.get_indexed_documents()
+    docs = await asyncio.to_thread(indexer.get_indexed_documents)
     return {
         "documents": [{"source_file": source, "chunk_count": count} for source, count in sorted(docs.items())],
         "count": len(docs),
@@ -160,7 +180,7 @@ async def list_documents() -> dict[str, Any]:
 async def trigger_indexing() -> dict[str, Any]:
     """Re-run indexing pipeline and return summary metrics."""
     indexer: SECIndexer = app.state.indexer
-    summary = indexer.index_documents()
+    summary = await asyncio.to_thread(indexer.index_documents)
     return {
         "indexed_documents": summary.indexed_documents,
         "skipped_documents": summary.skipped_documents,

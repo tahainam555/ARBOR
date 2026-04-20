@@ -77,3 +77,20 @@ class AudioTranscriber:
         text = await asyncio.to_thread(run_transcription)
         duration_ms = (time.perf_counter() - start) * 1000.0
         return text, duration_ms
+
+    async def warmup(self) -> None:
+        """Run a tiny silent inference once to lower first real transcription latency."""
+
+        def run_warmup() -> None:
+            silence = np.zeros((16000,), dtype=np.float32)
+            segments, _ = self.model.transcribe(
+                silence,
+                beam_size=1,
+                language="en",
+                vad_filter=True,
+                condition_on_previous_text=False,
+            )
+            for _ in segments:
+                break
+
+        await asyncio.to_thread(run_warmup)

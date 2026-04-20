@@ -123,6 +123,18 @@ class ConversationManager:
             lines.append(f"{role.upper()}: {content}")
         return "\n".join(lines)
 
+    @staticmethod
+    def _truncate_text_by_token_estimate(text: str, max_tokens: int) -> str:
+        """Trim overly long context strings using a lightweight token estimate."""
+        if max_tokens <= 0:
+            return ""
+
+        words = text.split()
+        max_words = max(1, int(max_tokens / 1.3))
+        if len(words) <= max_words:
+            return text
+        return " ".join(words[-max_words:])
+
     async def _retrieve_chunks(
         self,
         session_id: str,
@@ -130,14 +142,28 @@ class ConversationManager:
         message: str,
     ) -> list[RetrievedChunk]:
         """Run two-stage retrieval timing: embedding then vector search."""
-        async with self.latency_tracker.measure(session_id, turn_id, "rag_embedding"):
-            embedding = await self.retriever._embed_query(message)
+        embedding_start = time.perf_counter()
+        embedding = await self.retriever._embed_query(message)
+        await self.latency_tracker.log(
+            session_id=session_id,
+            turn_id=turn_id,
+            stage="rag_embedding",
+            duration_ms=(time.perf_counter() - embedding_start) * 1000.0,
+            metadata={"query_chars": len(message)},
+        )
 
-        async with self.latency_tracker.measure(session_id, turn_id, "rag_retrieval"):
-            chunks = await self.retriever.retrieve_with_embedding(
-                query_embedding=embedding,
-                top_k=self.settings.top_k_chunks,
-            )
+        retrieval_start = time.perf_counter()
+        chunks = await self.retriever.retrieve_with_embedding(
+            query_embedding=embedding,
+            top_k=self.settings.top_k_chunks,
+        )
+        await self.latency_tracker.log(
+            session_id=session_id,
+            turn_id=turn_id,
+            stage="rag_retrieval",
+            duration_ms=(time.perf_counter() - retrieval_start) * 1000.0,
+            metadata={"chunks_retrieved": len(chunks)},
+        )
 
         return chunks
 
@@ -176,6 +202,9 @@ class ConversationManager:
     ) -> str:
         """Build strict llama-3.2 instruct prompt format."""
         history_text = self._format_history(self._truncate_history(history, max_turns=6))
+        history_text = self._truncate_text_by_token_estimate(history_text, max_tokens=500)
+        rag_context = self._truncate_text_by_token_estimate(rag_context, max_tokens=2000)
+        tool_context = self._truncate_text_by_token_estimate(tool_context, max_tokens=500)
 
         prompt = (
             "<|begin_of_text|>\n"
@@ -225,11 +254,11 @@ class ConversationManager:
 
         crm_task = asyncio.create_task(self._load_crm_context(session))
         retrieval_task = asyncio.create_task(self._retrieve_chunks(session_id, turn_id, message))
+        tools_task = asyncio.create_task(self._run_tools(session_id, turn_id, message))
 
-        crm_context, chunks = await asyncio.gather(crm_task, retrieval_task)
+        crm_context, chunks, tool_result = await asyncio.gather(crm_task, retrieval_task, tools_task)
         rag_context = await self.retriever.format_context(chunks)
-
-        tool_context, _ = await self._run_tools(session_id, turn_id, message)
+        tool_context, _ = tool_result
 
         prompt = await self._build_prompt(
             user_message=message,
@@ -247,8 +276,27 @@ class ConversationManager:
             latency_tracker=self.latency_tracker,
         )
 
-        async with self.latency_tracker.measure(session_id, turn_id, "tts_synthesis"):
+        tts_start = time.perf_counter()
+        tts_error: str | None = None
+        try:
             await self.synthesizer.synthesize_streaming(assistant_text, websocket, turn_id=turn_id)
+        except Exception as exc:  # noqa: BLE001
+            tts_error = str(exc)
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "message": f"TTS unavailable for this turn: {tts_error}",
+                    "recoverable": True,
+                }
+            )
+        finally:
+            await self.latency_tracker.log(
+                session_id=session_id,
+                turn_id=turn_id,
+                stage="tts_synthesis",
+                duration_ms=(time.perf_counter() - tts_start) * 1000.0,
+                metadata={"success": tts_error is None, "error": tts_error},
+            )
 
         end_to_end_ms = (time.perf_counter() - end_to_end_start) * 1000.0
         await self.latency_tracker.log(
