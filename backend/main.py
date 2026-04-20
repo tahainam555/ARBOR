@@ -284,15 +284,22 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
                         "recoverable": True,
                     }
                 )
+            except WebSocketDisconnect:
+                logger.info("WebSocket disconnected for session=%s", session_id)
+                break
             except Exception as exc:  # noqa: BLE001
                 logger.exception("WebSocket message error for session=%s", session_id)
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "message": f"Server error: {exc}",
-                        "recoverable": True,
-                    }
-                )
+                try:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "message": f"Server error: {exc}",
+                            "recoverable": True,
+                        }
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.info("Unable to send error payload, websocket likely closed for session=%s", session_id)
+                    break
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected for session=%s", session_id)
     except Exception:  # noqa: BLE001
