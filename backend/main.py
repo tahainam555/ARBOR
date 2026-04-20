@@ -217,66 +217,83 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
     try:
         while True:
             payload = await websocket.receive_json()
-            msg_type = payload.get("type")
+            try:
+                msg_type = payload.get("type")
 
-            if msg_type == "text_input":
-                message = str(payload.get("message", "")).strip()
-                breakdown = await manager.handle_text_turn(
-                    session_id=session_id,
-                    message=message,
-                    websocket=websocket,
-                )
-                await websocket.send_json(
-                    {
-                        "type": "turn_complete",
-                        "turn_id": breakdown["turn_id"],
-                        "latency_breakdown": breakdown.get("stages", {}),
-                    }
-                )
-                continue
-
-            if msg_type == "audio_input":
-                encoded = payload.get("audio", "")
-                if not encoded:
+                if msg_type == "text_input":
+                    message = str(payload.get("message", "")).strip()
+                    breakdown = await manager.handle_text_turn(
+                        session_id=session_id,
+                        message=message,
+                        websocket=websocket,
+                        speak_response=False,
+                    )
                     await websocket.send_json(
                         {
-                            "type": "error",
-                            "message": "Missing audio payload",
-                            "recoverable": True,
+                            "type": "turn_complete",
+                            "turn_id": breakdown["turn_id"],
+                            "latency_breakdown": breakdown.get("stages", {}),
                         }
                     )
                     continue
 
-                audio_bytes = base64.b64decode(encoded)
-                breakdown = await manager.handle_audio_turn(
-                    session_id=session_id,
-                    audio_bytes=audio_bytes,
-                    websocket=websocket,
-                )
+                if msg_type == "audio_input":
+                    encoded = payload.get("audio", "")
+                    if not encoded:
+                        await websocket.send_json(
+                            {
+                                "type": "error",
+                                "message": "Missing audio payload",
+                                "recoverable": True,
+                            }
+                        )
+                        continue
+
+                    try:
+                        audio_bytes = base64.b64decode(encoded, validate=True)
+                    except Exception:  # noqa: BLE001
+                        await websocket.send_json(
+                            {
+                                "type": "error",
+                                "message": "Invalid base64 audio payload",
+                                "recoverable": True,
+                            }
+                        )
+                        continue
+
+                    audio_format = str(payload.get("format", "")).strip().lower() or None
+                    breakdown = await manager.handle_audio_turn(
+                        session_id=session_id,
+                        audio_bytes=audio_bytes,
+                        websocket=websocket,
+                        audio_format=audio_format,
+                    )
+                    await websocket.send_json(
+                        {
+                            "type": "turn_complete",
+                            "turn_id": breakdown["turn_id"],
+                            "latency_breakdown": breakdown.get("stages", {}),
+                        }
+                    )
+                    continue
+
                 await websocket.send_json(
                     {
-                        "type": "turn_complete",
-                        "turn_id": breakdown["turn_id"],
-                        "latency_breakdown": breakdown.get("stages", {}),
+                        "type": "error",
+                        "message": f"Unsupported message type: {msg_type}",
+                        "recoverable": True,
                     }
                 )
-                continue
-
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "message": f"Unsupported message type: {msg_type}",
-                    "recoverable": True,
-                }
-            )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("WebSocket message error for session=%s", session_id)
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": f"Server error: {exc}",
+                        "recoverable": True,
+                    }
+                )
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected for session=%s", session_id)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("WebSocket error for session=%s", session_id)
-        await websocket.send_json(
-            {
-                "type": "error",
-                "message": f"Server error: {exc}",
-                "recoverable": True,
-            }
-        )

@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 import time
 
 import numpy as np
 import soundfile as sf
 from faster_whisper import WhisperModel
+from faster_whisper.audio import decode_audio
 
 from backend.config import get_settings
+
+
+logger = logging.getLogger("sec-assistant")
 
 
 class AudioTranscriber:
@@ -43,8 +48,37 @@ class AudioTranscriber:
         return resampled.astype(np.float32)
 
     @classmethod
-    def _decode_audio_bytes(cls, audio_bytes: bytes) -> np.ndarray:
+    def _decode_audio_bytes(cls, audio_bytes: bytes, format_hint: str | None = None) -> np.ndarray:
         """Decode browser audio bytes into mono float32 waveform."""
+        if not audio_bytes:
+            return np.zeros((1,), dtype=np.float32)
+
+        normalized_hint = (format_hint or "").strip().lower().lstrip(".")
+        try_pyav_first = normalized_hint in {
+            "",
+            "webm",
+            "ogg",
+            "opus",
+            "mp3",
+            "m4a",
+            "aac",
+            "flac",
+            "wav",
+        }
+
+        if try_pyav_first:
+            try:
+                decoded = decode_audio(io.BytesIO(audio_bytes), sampling_rate=16000)
+                decoded = np.asarray(decoded, dtype=np.float32)
+
+                if decoded.ndim > 1:
+                    decoded = np.mean(decoded, axis=0).astype(np.float32)
+
+                if decoded.size > 0:
+                    return decoded
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("PyAV audio decode failed, falling back to soundfile: %s", exc)
+
         data, sample_rate = sf.read(io.BytesIO(audio_bytes), dtype="float32", always_2d=False)
 
         if isinstance(data, np.ndarray) and data.ndim > 1:
@@ -58,11 +92,11 @@ class AudioTranscriber:
 
         return cls._resample_to_16k(data.astype(np.float32), int(sample_rate))
 
-    async def transcribe(self, audio_bytes: bytes) -> tuple[str, float]:
+    async def transcribe(self, audio_bytes: bytes, format_hint: str | None = None) -> tuple[str, float]:
         """Transcribe audio bytes and return transcript with latency in ms."""
         start = time.perf_counter()
 
-        waveform = await asyncio.to_thread(self._decode_audio_bytes, audio_bytes)
+        waveform = await asyncio.to_thread(self._decode_audio_bytes, audio_bytes, format_hint)
 
         def run_transcription() -> str:
             segments, _ = self.model.transcribe(

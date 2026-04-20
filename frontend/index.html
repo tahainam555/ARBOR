@@ -337,15 +337,59 @@
     let reconnectDelay = 500;
     let currentAssistantBubble = null;
     let mediaRecorder = null;
+    let recordingMimeType = 'audio/webm';
     let recordedChunks = [];
     let recordingStart = 0;
     const audioQueue = [];
     let isPlayingAudio = false;
     const latencyHistory = [];
 
+    function pickRecorderMimeType() {
+      const preferred = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+        'audio/ogg'
+      ];
+
+      if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) {
+        return '';
+      }
+
+      for (const mime of preferred) {
+        if (MediaRecorder.isTypeSupported(mime)) {
+          return mime;
+        }
+      }
+
+      return '';
+    }
+
+    function guessFormatFromMimeType(mimeType) {
+      const value = (mimeType || '').toLowerCase();
+      if (value.includes('ogg')) return 'ogg';
+      if (value.includes('wav')) return 'wav';
+      if (value.includes('mp3') || value.includes('mpeg')) return 'mp3';
+      return 'webm';
+    }
+
+    function backendHost() {
+      const backendPort = '8000';
+
+      if (location.protocol === 'file:') {
+        return `127.0.0.1:${backendPort}`;
+      }
+
+      if (!location.port || location.port === backendPort) {
+        return location.host;
+      }
+
+      return `${location.hostname}:${backendPort}`;
+    }
+
     function wsUrl() {
       const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-      return `${protocol}://${location.host}/ws/${sessionId}`;
+      return `${protocol}://${backendHost()}/ws/${sessionId}`;
     }
 
     function setConnectionState(online) {
@@ -506,36 +550,61 @@
     }
 
     async function startRecording() {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      recordedChunks = [];
-      mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) recordedChunks.push(event.data);
-      };
-      mediaRecorder.onstop = async () => {
-        const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-        const buffer = await blob.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-        let binary = '';
-        bytes.forEach((b) => binary += String.fromCharCode(b));
-        const base64Audio = btoa(binary);
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          currentAssistantBubble = addBubble('assistant', '');
-          ws.send(JSON.stringify({
-            type: 'audio_input',
-            session_id: sessionId,
-            audio: base64Audio,
-            format: 'webm'
-          }));
-        }
-        stream.getTracks().forEach((track) => track.stop());
-      };
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        addBubble('assistant', 'Error: This browser does not support microphone capture.');
+        return;
+      }
 
-      recordingStart = Date.now();
-      waveEl.classList.add('active');
-      micBtn.classList.add('recording');
-      mediaRecorder.start();
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        addBubble('assistant', 'Error: Connection is offline, please wait a moment and try again.');
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        recordedChunks = [];
+
+        const mimeType = pickRecorderMimeType();
+        mediaRecorder = mimeType
+          ? new MediaRecorder(stream, { mimeType })
+          : new MediaRecorder(stream);
+
+        recordingMimeType = mediaRecorder.mimeType || mimeType || 'audio/webm';
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) recordedChunks.push(event.data);
+        };
+
+        mediaRecorder.onstop = async () => {
+          try {
+            const blob = new Blob(recordedChunks, { type: recordingMimeType });
+            const buffer = await blob.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+            let binary = '';
+            bytes.forEach((b) => binary += String.fromCharCode(b));
+            const base64Audio = btoa(binary);
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              currentAssistantBubble = addBubble('assistant', '');
+              ws.send(JSON.stringify({
+                type: 'audio_input',
+                session_id: sessionId,
+                audio: base64Audio,
+                format: guessFormatFromMimeType(recordingMimeType)
+              }));
+            }
+          } finally {
+            stream.getTracks().forEach((track) => track.stop());
+          }
+        };
+
+        recordingStart = Date.now();
+        waveEl.classList.add('active');
+        micBtn.classList.add('recording');
+        mediaRecorder.start();
+      } catch (error) {
+        addBubble('assistant', `Error: Could not start microphone (${error.message || error}).`);
+      }
     }
 
     function stopRecording() {

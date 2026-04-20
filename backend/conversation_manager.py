@@ -239,6 +239,7 @@ class ConversationManager:
         websocket: Any,
         forced_turn_id: int | None = None,
         end_to_end_start: float | None = None,
+        speak_response: bool = False,
     ) -> dict[str, Any]:
         """Process one text turn end-to-end and stream response outputs."""
         session = self._get_or_create_session(session_id)
@@ -276,26 +277,34 @@ class ConversationManager:
             latency_tracker=self.latency_tracker,
         )
 
-        tts_start = time.perf_counter()
-        tts_error: str | None = None
-        try:
-            await self.synthesizer.synthesize_streaming(assistant_text, websocket, turn_id=turn_id)
-        except Exception as exc:  # noqa: BLE001
-            tts_error = str(exc)
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "message": f"TTS unavailable for this turn: {tts_error}",
-                    "recoverable": True,
-                }
-            )
-        finally:
+        if speak_response:
+            tts_start = time.perf_counter()
+            tts_error: str | None = None
+            try:
+                await self.synthesizer.synthesize_streaming(assistant_text, websocket, turn_id=turn_id)
+            except Exception as exc:  # noqa: BLE001
+                tts_error = str(exc)
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": f"TTS unavailable for this turn: {tts_error}",
+                        "recoverable": True,
+                    }
+                )
             await self.latency_tracker.log(
                 session_id=session_id,
                 turn_id=turn_id,
                 stage="tts_synthesis",
                 duration_ms=(time.perf_counter() - tts_start) * 1000.0,
                 metadata={"success": tts_error is None, "error": tts_error},
+            )
+        else:
+            await self.latency_tracker.log(
+                session_id=session_id,
+                turn_id=turn_id,
+                stage="tts_synthesis",
+                duration_ms=0.0,
+                metadata={"success": True, "skipped": True, "reason": "text_input"},
             )
 
         end_to_end_ms = (time.perf_counter() - end_to_end_start) * 1000.0
@@ -320,6 +329,7 @@ class ConversationManager:
         session_id: str,
         audio_bytes: bytes,
         websocket: Any,
+        audio_format: str | None = None,
     ) -> dict[str, Any]:
         """Process one audio turn: STT -> text pipeline -> TTS output."""
         session = self._get_or_create_session(session_id)
@@ -328,7 +338,7 @@ class ConversationManager:
         turn_start = time.perf_counter()
 
         async with self.latency_tracker.measure(session_id, turn_id, "stt_transcription"):
-            text, duration_ms = await self.transcriber.transcribe(audio_bytes)
+            text, duration_ms = await self.transcriber.transcribe(audio_bytes, format_hint=audio_format)
 
         await websocket.send_json(
             {
@@ -344,6 +354,7 @@ class ConversationManager:
             websocket=websocket,
             forced_turn_id=turn_id,
             end_to_end_start=turn_start,
+            speak_response=True,
         )
 
     def get_active_sessions(self) -> list[dict[str, Any]]:
