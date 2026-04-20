@@ -37,6 +37,17 @@ class LLMEngine:
             cls._instance = cls()
         return cls._instance
 
+    def _trim_prompt_to_context(self, prompt: str, reserved_output_tokens: int = 512) -> str:
+        """Ensure prompt tokens fit model context by trimming oldest prefix content."""
+        max_prompt_tokens = max(256, self.settings.n_ctx - reserved_output_tokens)
+        prompt_tokens = self.model.tokenize(prompt.encode("utf-8"), add_bos=False)
+        if len(prompt_tokens) <= max_prompt_tokens:
+            return prompt
+
+        trimmed_tokens = prompt_tokens[-max_prompt_tokens:]
+        trimmed = self.model.detokenize(trimmed_tokens).decode("utf-8", errors="ignore")
+        return trimmed
+
     async def generate_streaming(
         self,
         prompt: str,
@@ -46,6 +57,7 @@ class LLMEngine:
         latency_tracker: Any,
     ) -> str:
         """Generate streamed text and emit websocket chunks token-by-token."""
+        prompt = self._trim_prompt_to_context(prompt, reserved_output_tokens=512)
         queue: asyncio.Queue[str | None] = asyncio.Queue()
         loop = asyncio.get_running_loop()
         full_tokens: list[str] = []
@@ -109,6 +121,7 @@ class LLMEngine:
 
     async def generate_full(self, prompt: str) -> str:
         """Generate a non-streaming short response for deterministic tool routing."""
+        prompt = self._trim_prompt_to_context(prompt, reserved_output_tokens=100)
 
         def run() -> str:
             result = self.model.create_completion(

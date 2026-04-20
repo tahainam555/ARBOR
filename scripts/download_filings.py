@@ -88,7 +88,7 @@ def build_headers(user_agent: str) -> dict[str, str]:
     return {
         "User-Agent": user_agent,
         "Accept-Encoding": "gzip, deflate",
-        "Host": "www.sec.gov",
+        "Accept": "application/json, text/html;q=0.9, */*;q=0.8",
     }
 
 
@@ -309,8 +309,12 @@ async def run_downloads(user_agent: str, docs_path: Path) -> None:
 
         async def wrapped(company: Company) -> tuple[str, int, int]:
             async with semaphore:
-                downloaded, missing = await process_company(client, docs_path, company)
-                return company.ticker, downloaded, missing
+                try:
+                    downloaded, missing = await process_company(client, docs_path, company)
+                    return company.ticker, downloaded, missing
+                except Exception as exc:  # noqa: BLE001
+                    logging.error("Company failed %s: %s", company.ticker, exc)
+                    return company.ticker, 0, len(REQUIRED_FILINGS)
 
         tasks = [wrapped(company) for company in COMPANIES]
         results = await asyncio.gather(*tasks)

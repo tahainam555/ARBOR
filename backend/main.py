@@ -83,7 +83,10 @@ async def on_startup() -> None:
         CalculatorTool(),
         NewsTool(),
     ]
-    orchestrator = ToolOrchestrator(tools)
+    orchestrator = ToolOrchestrator(
+        tools,
+        llm_intent_detector=llm_engine.generate_full,
+    )
 
     app.state.latency_tracker = latency_tracker
     app.state.crm_tool = crm_tool

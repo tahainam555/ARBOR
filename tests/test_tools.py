@@ -44,6 +44,33 @@ async def test_stock_price_invalid_ticker() -> None:
 
 
 @pytest.mark.asyncio
+async def test_stock_price_valid_ticker_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    tool = StockPriceTool()
+
+    def fake_fetch_sync(ticker: str):
+        return {
+            "ticker": ticker,
+            "price": 189.43,
+            "change_pct": 1.24,
+            "volume": 54231000,
+            "market_cap": "2.94T",
+            "pe_ratio": 29.4,
+            "dividend_yield": 0.52,
+            "52w_high": 199.62,
+            "52w_low": 124.17,
+            "currency": "USD",
+            "market_closed": False,
+        }
+
+    monkeypatch.setattr(tool, "_fetch_sync", fake_fetch_sync)
+    result = await tool.execute(ticker="AAPL")
+
+    assert result.success is True
+    assert result.data["ticker"] == "AAPL"
+    assert result.data["price"] == pytest.approx(189.43)
+
+
+@pytest.mark.asyncio
 async def test_calculator_roi() -> None:
     tool = CalculatorTool()
     result = await tool.execute(
@@ -84,7 +111,10 @@ class SlowTool(BaseTool):
 
 @pytest.mark.asyncio
 async def test_tool_timeout_handling() -> None:
-    orchestrator = ToolOrchestrator([SlowTool()])
+    async def fake_detector(_: str) -> str:
+        return '{"tool": "slow_tool", "params": {}}'
 
-    with pytest.raises(asyncio.TimeoutError):
-        await orchestrator._execute_one("slow_tool", {})
+    orchestrator = ToolOrchestrator([SlowTool()], llm_intent_detector=fake_detector)
+    result = await orchestrator.detect_and_execute("run slow tool", "session-1")
+    assert "slow_tool" in result.results
+    assert result.results["slow_tool"]["success"] is False

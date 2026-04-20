@@ -203,13 +203,25 @@ class ConversationManager:
             return
         await self.crm_tool.log_interaction(session.user_id, session.session_id, summary)
 
-    async def handle_text_turn(self, session_id: str, message: str, websocket: Any) -> dict[str, Any]:
+    async def handle_text_turn(
+        self,
+        session_id: str,
+        message: str,
+        websocket: Any,
+        forced_turn_id: int | None = None,
+        end_to_end_start: float | None = None,
+    ) -> dict[str, Any]:
         """Process one text turn end-to-end and stream response outputs."""
         session = self._get_or_create_session(session_id)
-        session.turn_count += 1
-        turn_id = session.turn_count
+        if forced_turn_id is None:
+            session.turn_count += 1
+            turn_id = session.turn_count
+        else:
+            turn_id = forced_turn_id
+            session.turn_count = max(session.turn_count, turn_id)
 
-        end_to_end_start = time.perf_counter()
+        if end_to_end_start is None:
+            end_to_end_start = time.perf_counter()
 
         crm_task = asyncio.create_task(self._load_crm_context(session))
         retrieval_task = asyncio.create_task(self._retrieve_chunks(session_id, turn_id, message))
@@ -263,7 +275,9 @@ class ConversationManager:
     ) -> dict[str, Any]:
         """Process one audio turn: STT -> text pipeline -> TTS output."""
         session = self._get_or_create_session(session_id)
-        turn_id = session.turn_count + 1
+        session.turn_count += 1
+        turn_id = session.turn_count
+        turn_start = time.perf_counter()
 
         async with self.latency_tracker.measure(session_id, turn_id, "stt_transcription"):
             text, duration_ms = await self.transcriber.transcribe(audio_bytes)
@@ -276,7 +290,13 @@ class ConversationManager:
             }
         )
 
-        return await self.handle_text_turn(session_id=session_id, message=text, websocket=websocket)
+        return await self.handle_text_turn(
+            session_id=session_id,
+            message=text,
+            websocket=websocket,
+            forced_turn_id=turn_id,
+            end_to_end_start=turn_start,
+        )
 
     def get_active_sessions(self) -> list[dict[str, Any]]:
         """Return serialized active sessions for diagnostics endpoint."""

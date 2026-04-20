@@ -23,7 +23,10 @@ class SpeechSynthesizer:
         """Normalize markdown/finance tokens into speech-friendly text."""
         cleaned = text
         cleaned = re.sub(r"[`*_#]", "", cleaned)
+        cleaned = cleaned.replace("DEF 14A/A", "DEF fourteen A amendment")
+        cleaned = cleaned.replace("DEF 14A", "DEF fourteen A filing")
         cleaned = cleaned.replace("10-K", "ten K filing")
+        cleaned = cleaned.replace("10-Q", "ten Q filing")
         cleaned = cleaned.replace("YoY", "year over year")
         cleaned = re.sub(r"\$", " dollars ", cleaned)
         cleaned = re.sub(r"%", " percent ", cleaned)

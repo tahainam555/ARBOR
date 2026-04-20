@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -25,8 +26,13 @@ class ToolExecutionResult:
 class ToolOrchestrator:
     """Detects tool intent and runs tools with robust timeouts."""
 
-    def __init__(self, tools: list[BaseTool]) -> None:
+    def __init__(
+        self,
+        tools: list[BaseTool],
+        llm_intent_detector: Callable[[str], Awaitable[str]] | None = None,
+    ) -> None:
         self.tools: dict[str, BaseTool] = {tool.name: tool for tool in tools}
+        self.llm_intent_detector = llm_intent_detector
 
     @staticmethod
     def _extract_ticker(message: str) -> str | None:
@@ -143,12 +149,45 @@ class ToolOrchestrator:
                 lines.append(f"[{name}] ERROR: {result.error}")
         return "\n".join(lines)
 
+    async def _llm_based_detection(self, message: str) -> list[dict[str, Any]]:
+        """Fallback intent detection for ambiguous requests using LLM JSON output."""
+        if self.llm_intent_detector is None:
+            return []
+
+        prompt = (
+            "Given this user message, which tool should be called? Output JSON only.\n"
+            "Tools: [crm_tool, stock_price, calculator, news_tool, none]\n"
+            f"User: {message}\n"
+            "Response format: {\"tool\": \"stock_price\", \"params\": {\"ticker\": \"AAPL\"}}"
+        )
+
+        try:
+            raw = await self.llm_intent_detector(prompt)
+            json_match = re.search(r"\{[\s\S]*\}", raw)
+            if not json_match:
+                return []
+
+            payload = json.loads(json_match.group(0))
+            tool_name = str(payload.get("tool", "none")).strip()
+            params = payload.get("params", {})
+            if tool_name == "none" or tool_name not in self.tools:
+                return []
+
+            if not isinstance(params, dict):
+                params = {}
+
+            return [{"tool": tool_name, "params": params}]
+        except Exception:
+            return []
+
     async def detect_and_execute(self, message: str, session_id: str) -> ToolExecutionResult:
         """Detect candidate tools and execute them asynchronously."""
         del session_id  # Reserved for future session-aware routing.
 
         start = time.perf_counter()
         detections = self._rule_based_detection(message)
+        if not detections:
+            detections = await self._llm_based_detection(message)
 
         if not detections:
             return ToolExecutionResult(duration_ms=(time.perf_counter() - start) * 1000.0)
