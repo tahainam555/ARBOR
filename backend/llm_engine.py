@@ -1,19 +1,19 @@
-"""Llama.cpp engine wrapper with streaming token output."""
+"""Ollama engine wrapper with streaming token output."""
 
 from __future__ import annotations
 
 import asyncio
-import threading
+import json
 import time
 from typing import Any
 
-from llama_cpp import Llama
+import httpx
 
 from backend.config import get_settings
 
 
 class LLMEngine:
-    """Singleton wrapper around llama-cpp for streaming and short-form generation."""
+    """Singleton wrapper around Ollama for streaming and short-form generation."""
 
     _instance: "LLMEngine | None" = None
 
@@ -21,15 +21,9 @@ class LLMEngine:
         settings = get_settings()
         self.settings = settings
         self._model_lock = asyncio.Lock()
-        self.model = Llama(
-            model_path=str(settings.llm_model_file),
-            n_ctx=settings.n_ctx,
-            n_threads=settings.n_threads,
-            n_batch=512,
-            verbose=False,
-            use_mmap=True,
-            use_mlock=False,
-        )
+        self.base_url = settings.ollama_base_url.rstrip("/")
+        self.model_name = settings.ollama_model
+        self.request_timeout = httpx.Timeout(300.0, connect=30.0)
 
     @classmethod
     def get_instance(cls) -> "LLMEngine":
@@ -39,15 +33,61 @@ class LLMEngine:
         return cls._instance
 
     def _trim_prompt_to_context(self, prompt: str, reserved_output_tokens: int = 512) -> str:
-        """Ensure prompt tokens fit model context by trimming oldest prefix content."""
+        """Ensure prompt stays within the requested context window."""
         max_prompt_tokens = max(256, self.settings.n_ctx - reserved_output_tokens)
-        prompt_tokens = self.model.tokenize(prompt.encode("utf-8"), add_bos=False)
-        if len(prompt_tokens) <= max_prompt_tokens:
+        prompt_words = prompt.split()
+        if len(prompt_words) <= int(max_prompt_tokens / 1.3):
             return prompt
 
-        trimmed_tokens = prompt_tokens[-max_prompt_tokens:]
-        trimmed = self.model.detokenize(trimmed_tokens).decode("utf-8", errors="ignore")
-        return trimmed
+        return " ".join(prompt_words[-int(max_prompt_tokens / 1.3) :])
+
+    def _request_payload(self, prompt: str, *, temperature: float, max_tokens: int) -> dict[str, Any]:
+        """Build a request payload for Ollama's generate endpoint."""
+        return {
+            "model": self.model_name,
+            "prompt": prompt,
+            "raw": True,
+            "stream": True,
+            "keep_alive": "30m",
+            "options": {
+                "num_ctx": self.settings.n_ctx,
+                "num_thread": self.settings.n_threads,
+                "temperature": temperature,
+                "top_p": 0.9,
+                "top_k": 40,
+                "repeat_penalty": 1.1,
+                "num_predict": max_tokens,
+            },
+        }
+
+    async def _stream_generate(self, prompt: str, temperature: float, max_tokens: int) -> asyncio.AsyncIterator[str]:
+        """Stream response chunks from Ollama's generate API."""
+        payload = self._request_payload(prompt, temperature=temperature, max_tokens=max_tokens)
+        async with httpx.AsyncClient(base_url=self.base_url, timeout=self.request_timeout) as client:
+            async with client.stream("POST", "/api/generate", json=payload) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
+
+                    chunk = json.loads(line)
+                    text = str(chunk.get("response", ""))
+                    if text:
+                        yield text
+
+                    if bool(chunk.get("done", False)):
+                        break
+
+    async def _generate_full_text(self, prompt: str, temperature: float, max_tokens: int) -> str:
+        """Run a non-streaming Ollama generation request."""
+        payload = self._request_payload(prompt, temperature=temperature, max_tokens=max_tokens)
+        payload["stream"] = False
+
+        async with httpx.AsyncClient(base_url=self.base_url, timeout=self.request_timeout) as client:
+            response = await client.post("/api/generate", json=payload)
+            response.raise_for_status()
+            data = response.json()
+            return str(data.get("response", "")).strip()
 
     async def generate_streaming(
         self,
@@ -60,38 +100,11 @@ class LLMEngine:
         """Generate streamed text and emit websocket chunks token-by-token."""
         async with self._model_lock:
             prompt = self._trim_prompt_to_context(prompt, reserved_output_tokens=512)
-            queue: asyncio.Queue[str | None] = asyncio.Queue()
-            loop = asyncio.get_running_loop()
             full_tokens: list[str] = []
             start_time = time.perf_counter()
             first_token_time: float | None = None
 
-            def worker() -> None:
-                try:
-                    stream = self.model.create_completion(
-                        prompt=prompt,
-                        temperature=0.1,
-                        top_p=0.9,
-                        top_k=40,
-                        repeat_penalty=1.1,
-                        max_tokens=512,
-                        stream=True,
-                    )
-
-                    for event in stream:
-                        token = event["choices"][0]["text"]
-                        loop.call_soon_threadsafe(queue.put_nowait, token)
-                finally:
-                    loop.call_soon_threadsafe(queue.put_nowait, None)
-
-            thread = threading.Thread(target=worker, daemon=True)
-            thread.start()
-
-            while True:
-                token = await queue.get()
-                if token is None:
-                    break
-
+            async for token in self._stream_generate(prompt, temperature=0.1, max_tokens=512):
                 if first_token_time is None:
                     first_token_time = (time.perf_counter() - start_time) * 1000.0
                     await latency_tracker.log(
@@ -123,32 +136,11 @@ class LLMEngine:
 
     async def generate_full(self, prompt: str) -> str:
         """Generate a non-streaming short response for deterministic tool routing."""
-        def run() -> str:
-            result = self.model.create_completion(
-                prompt=prompt,
-                temperature=0.0,
-                top_p=0.9,
-                top_k=40,
-                repeat_penalty=1.1,
-                max_tokens=100,
-                stream=False,
-            )
-            return result["choices"][0]["text"].strip()
-
         async with self._model_lock:
             prompt = self._trim_prompt_to_context(prompt, reserved_output_tokens=100)
-            return await asyncio.to_thread(run)
+            return await self._generate_full_text(prompt, temperature=0.0, max_tokens=100)
 
     async def warmup(self) -> None:
         """Run a minimal completion once so first user turn has lower cold-start latency."""
-
-        def run() -> None:
-            self.model.create_completion(
-                prompt="Warmup.",
-                temperature=0.0,
-                max_tokens=1,
-                stream=False,
-            )
-
         async with self._model_lock:
-            await asyncio.to_thread(run)
+            await self._generate_full_text("Warmup.", temperature=0.0, max_tokens=1)

@@ -20,10 +20,13 @@ class Settings(BaseSettings):
     )
 
     # LLM
+    llm_backend: str = Field(default="ollama", alias="LLM_BACKEND")
     llm_model_path: str = Field(
         default="./models/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
         alias="LLM_MODEL_PATH",
     )
+    ollama_base_url: str = Field(default="http://127.0.0.1:11434", alias="OLLAMA_BASE_URL")
+    ollama_model: str = Field(default="llama3.2:3b", alias="OLLAMA_MODEL")
     n_threads: int = Field(default=8, alias="N_THREADS")
     n_ctx: int = Field(default=4096, alias="N_CTX")
 
@@ -58,6 +61,11 @@ class Settings(BaseSettings):
     def llm_model_file(self) -> Path:
         """Return absolute path of the GGUF model file."""
         return (self.project_root / self.llm_model_path).resolve()
+
+    @property
+    def llm_backend_name(self) -> str:
+        """Return normalized LLM backend name."""
+        return self.llm_backend.strip().lower()
 
     @property
     def chroma_dir(self) -> Path:

@@ -116,16 +116,21 @@ async def on_startup() -> None:
         except Exception as exc:  # noqa: BLE001
             return name, (time.perf_counter() - warmup_start) * 1000.0, str(exc)
 
-    warmup_results = await asyncio.gather(
-        _run_warmup("retriever", retriever.warmup()),
-        _run_warmup("transcriber", transcriber.warmup()),
-        _run_warmup("llm_engine", llm_engine.warmup()),
-    )
+    async def _warmup_background() -> None:
+        warmup_results = await asyncio.gather(
+            _run_warmup("retriever", retriever.warmup()),
+            _run_warmup("transcriber", transcriber.warmup()),
+            _run_warmup("llm_engine", llm_engine.warmup()),
+        )
 
-    for name, duration_ms, error in warmup_results:
-        component_times[f"warmup_{name}"] = duration_ms
-        if error:
-            logger.warning("Warmup failed for %s: %s", name, error)
+        for name, duration_ms, error in warmup_results:
+            component_times[f"warmup_{name}"] = duration_ms
+            if error:
+                logger.warning("Warmup failed for %s: %s", name, error)
+
+        logger.info("Warmups complete")
+
+    app.state.warmup_task = asyncio.create_task(_warmup_background())
 
     total_ms = (time.perf_counter() - start) * 1000.0
     logger.info("System ready")
