@@ -4,18 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from backend.config import get_settings
+from backend.chat_store import ChatStore
+from backend.domain_classifier import DomainClassifier
+from backend.error_recovery import build_recoverable_error_payload
 from backend.latency_tracker import LatencyTracker
 from backend.llm_engine import LLMEngine
-from backend.rag.retriever import RAGRetriever, RetrievedChunk
+from backend.session_store import SessionStore
+from backend.summarizer import ConversationSummarizer
 from backend.tool_orchestrator import ToolOrchestrator
 from backend.tools.crm_tool import CRMTool
 from backend.voice.synthesizer import SpeechSynthesizer
 from backend.voice.transcriber import AudioTranscriber
+
+if TYPE_CHECKING:
+    from backend.rag.retriever import RAGRetriever, RetrievedChunk
 
 
 SYSTEM_PROMPT = (
@@ -31,6 +39,7 @@ class ConversationSession:
 
     session_id: str
     user_id: str | None = None
+    running_summary: str | None = None
     history: list[dict[str, str]] = field(default_factory=list)
     turn_count: int = 0
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -49,6 +58,10 @@ class ConversationManager:
         synthesizer: SpeechSynthesizer,
         latency_tracker: LatencyTracker,
         crm_tool: CRMTool,
+        session_store: SessionStore | None = None,
+        chat_store: ChatStore | None = None,
+        domain_classifier: DomainClassifier | None = None,
+        summarizer: ConversationSummarizer | None = None,
     ) -> None:
         self.settings = get_settings()
         self.llm_engine = llm_engine
@@ -58,6 +71,10 @@ class ConversationManager:
         self.synthesizer = synthesizer
         self.latency_tracker = latency_tracker
         self.crm_tool = crm_tool
+        self.session_store = session_store or SessionStore()
+        self.chat_store = chat_store or ChatStore()
+        self.domain_classifier = domain_classifier or DomainClassifier()
+        self.summarizer = summarizer or ConversationSummarizer()
         self.sessions: dict[str, ConversationSession] = {}
 
     def _cleanup_sessions(self) -> None:
@@ -89,6 +106,35 @@ class ConversationManager:
 
         session = self.sessions[session_id]
         session.last_activity = datetime.now(timezone.utc)
+        return session
+
+    async def _load_or_create_session(self, session_id: str) -> ConversationSession:
+        """Load session state from SQLite, falling back to a fresh session."""
+        self._cleanup_sessions()
+        if session_id in self.sessions:
+            session = self.sessions[session_id]
+            session.last_activity = datetime.now(timezone.utc)
+            await self.session_store.touch_session(session_id, user_id=session.user_id, turn_count=session.turn_count)
+            return session
+
+        stored = await self.session_store.get_session(session_id)
+        if stored is None:
+            stored = await self.session_store.create_session(session_id=session_id)
+
+        history = await self.chat_store.get_history(session_id, limit=12)
+        created_at = datetime.fromisoformat(stored["created_at"])
+        last_activity = datetime.fromisoformat(stored["last_activity"])
+        session = ConversationSession(
+            session_id=session_id,
+            user_id=stored.get("user_id"),
+            running_summary=stored.get("summary"),
+            history=[{"role": item["role"], "content": item["content"]} for item in history],
+            turn_count=int(stored.get("turn_count", 0)),
+            created_at=created_at,
+            last_activity=last_activity,
+        )
+        self.sessions[session_id] = session
+        await self.session_store.touch_session(session_id, user_id=session.user_id, turn_count=session.turn_count)
         return session
 
     @staticmethod
@@ -198,6 +244,7 @@ class ConversationManager:
         crm_context: str,
         rag_context: str,
         tool_context: str,
+        session_summary: str | None,
         history: list[dict[str, str]],
     ) -> str:
         """Build strict llama-3.2 instruct prompt format."""
@@ -205,6 +252,7 @@ class ConversationManager:
         history_text = self._truncate_text_by_token_estimate(history_text, max_tokens=500)
         rag_context = self._truncate_text_by_token_estimate(rag_context, max_tokens=2000)
         tool_context = self._truncate_text_by_token_estimate(tool_context, max_tokens=500)
+        summary_context = self._truncate_text_by_token_estimate(session_summary or "No prior session summary.", max_tokens=250)
 
         prompt = (
             "<|begin_of_text|>\n"
@@ -216,6 +264,8 @@ class ConversationManager:
             f"{rag_context}\n\n"
             "TOOL RESULTS:\n"
             f"{tool_context}\n\n"
+            "SESSION SUMMARY:\n"
+            f"{summary_context}\n\n"
             "RECENT HISTORY:\n"
             f"{history_text}\n"
             "<|eot_id|>\n"
@@ -226,11 +276,64 @@ class ConversationManager:
         )
         return prompt
 
+    async def _send_recoverable_error(self, websocket: Any, message: str | None = None) -> None:
+        """Emit a standard recoverable error payload if the socket is still open."""
+        try:
+            await websocket.send_json(build_recoverable_error_payload(message))
+        except Exception:  # noqa: BLE001
+            return
+
+    @staticmethod
+    def _domain_refusal_text() -> str:
+        """Return the fixed refusal message for off-domain requests."""
+        return (
+            "I can only help with SEC filings, public companies, market data, "
+            "portfolio analysis, and related calculations. Ask about a ticker, filing, or company."
+        )
+
     async def _log_interaction_async(self, session: ConversationSession, summary: str) -> None:
         """Persist interaction summary without blocking turn completion."""
         if not session.user_id:
             return
         await self.crm_tool.log_interaction(session.user_id, session.session_id, summary)
+
+    async def _maybe_refresh_summary(self, session: ConversationSession) -> None:
+        """Refresh and persist running summary at a fixed turn interval."""
+        if not self.summarizer.should_summarize(session.turn_count):
+            return
+
+        await self._refresh_summary_from_session(session)
+
+    async def _refresh_summary_from_session(self, session: ConversationSession, history_limit: int = 40) -> str:
+        """Build and persist a fresh summary for a session using persisted history."""
+        start = time.perf_counter()
+        history_rows = await self.chat_store.get_history(session.session_id, limit=history_limit)
+        history = [{"role": item["role"], "content": item["content"]} for item in history_rows]
+        updated = self.summarizer.summarize(history, previous_summary=session.running_summary)
+        if not updated:
+            return session.running_summary or ""
+
+        session.running_summary = updated
+        await self.session_store.update_summary(session.session_id, updated)
+        await self.latency_tracker.log(
+            session_id=session.session_id,
+            turn_id=session.turn_count,
+            stage="conversation_summary",
+            duration_ms=(time.perf_counter() - start) * 1000.0,
+            metadata={"chars": len(updated)},
+        )
+        return updated
+
+    async def refresh_session_summary(self, session_id: str, history_limit: int = 40) -> dict[str, Any]:
+        """Force-refresh summary for one session and return updated session payload."""
+        session = await self._load_or_create_session(session_id)
+        summary = await self._refresh_summary_from_session(session, history_limit=history_limit)
+        stored = await self.session_store.get_session(session_id)
+        return {
+            "session_id": session_id,
+            "summary": summary,
+            "session": stored,
+        }
 
     async def handle_text_turn(
         self,
@@ -242,7 +345,7 @@ class ConversationManager:
         speak_response: bool = False,
     ) -> dict[str, Any]:
         """Process one text turn end-to-end and stream response outputs."""
-        session = self._get_or_create_session(session_id)
+        session = await self._load_or_create_session(session_id)
         if forced_turn_id is None:
             session.turn_count += 1
             turn_id = session.turn_count
@@ -250,62 +353,134 @@ class ConversationManager:
             turn_id = forced_turn_id
             session.turn_count = max(session.turn_count, turn_id)
 
+        turn_start = time.perf_counter()
+        await self.chat_store.append_message(session_id, turn_id, "user", message)
+        await self.session_store.touch_session(session_id, user_id=session.user_id, turn_count=session.turn_count)
+
         if end_to_end_start is None:
-            end_to_end_start = time.perf_counter()
+            end_to_end_start = turn_start
 
-        crm_task = asyncio.create_task(self._load_crm_context(session))
-        retrieval_task = asyncio.create_task(self._retrieve_chunks(session_id, turn_id, message))
-        tools_task = asyncio.create_task(self._run_tools(session_id, turn_id, message))
-
-        crm_context, chunks, tool_result = await asyncio.gather(crm_task, retrieval_task, tools_task)
-        rag_context = await self.retriever.format_context(chunks)
-        tool_context, _ = tool_result
-
-        prompt = await self._build_prompt(
-            user_message=message,
-            crm_context=crm_context,
-            rag_context=rag_context,
-            tool_context=tool_context,
-            history=session.history,
-        )
-
-        assistant_text = await self.llm_engine.generate_streaming(
-            prompt=prompt,
-            websocket=websocket,
+        domain_start = time.perf_counter()
+        domain_decision = self.domain_classifier.classify(message)
+        await self.latency_tracker.log(
             session_id=session_id,
             turn_id=turn_id,
-            latency_tracker=self.latency_tracker,
+            stage="domain_check",
+            duration_ms=(time.perf_counter() - domain_start) * 1000.0,
+            metadata={
+                "allowed": domain_decision.allowed,
+                "reason": domain_decision.reason,
+                "confidence": domain_decision.confidence,
+            },
         )
 
-        if speak_response:
-            tts_start = time.perf_counter()
-            tts_error: str | None = None
-            try:
-                await self.synthesizer.synthesize_streaming(assistant_text, websocket, turn_id=turn_id)
-            except Exception as exc:  # noqa: BLE001
-                tts_error = str(exc)
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "message": f"TTS unavailable for this turn: {tts_error}",
-                        "recoverable": True,
-                    }
-                )
-            await self.latency_tracker.log(
-                session_id=session_id,
-                turn_id=turn_id,
-                stage="tts_synthesis",
-                duration_ms=(time.perf_counter() - tts_start) * 1000.0,
-                metadata={"success": tts_error is None, "error": tts_error},
+        if not domain_decision.allowed:
+            refusal_text = self._domain_refusal_text()
+            await websocket.send_json(
+                {
+                    "type": "text_chunk",
+                    "content": refusal_text,
+                    "turn_id": turn_id,
+                }
             )
-        else:
             await self.latency_tracker.log(
                 session_id=session_id,
                 turn_id=turn_id,
                 stage="tts_synthesis",
                 duration_ms=0.0,
-                metadata={"success": True, "skipped": True, "reason": "text_input"},
+                metadata={"success": True, "skipped": True, "reason": "domain_refusal"},
             )
+            end_to_end_ms = (time.perf_counter() - end_to_end_start) * 1000.0
+            await self.latency_tracker.log(
+                session_id=session_id,
+                turn_id=turn_id,
+                stage="end_to_end",
+                duration_ms=end_to_end_ms,
+                metadata={"domain_allowed": False},
+            )
+            session.history.append({"role": "user", "content": message})
+            session.history.append({"role": "assistant", "content": refusal_text})
+            session.history = self._truncate_history(session.history, max_turns=6)
+            await self.chat_store.append_message(session_id, turn_id, "assistant", refusal_text)
+            await self.session_store.touch_session(session_id, user_id=session.user_id, turn_count=session.turn_count)
+            asyncio.create_task(self._log_interaction_async(session, refusal_text[:500]))
+            breakdown = await self.latency_tracker.get_turn_breakdown(session_id, turn_id)
+            return breakdown
+
+        try:
+            crm_task = asyncio.create_task(self._load_crm_context(session))
+            retrieval_task = asyncio.create_task(self._retrieve_chunks(session_id, turn_id, message))
+            tools_task = asyncio.create_task(self._run_tools(session_id, turn_id, message))
+
+            crm_context, chunks, tool_result = await asyncio.gather(crm_task, retrieval_task, tools_task)
+            rag_context = await self.retriever.format_context(chunks)
+            tool_context, _ = tool_result
+
+            prompt = await self._build_prompt(
+                user_message=message,
+                crm_context=crm_context,
+                rag_context=rag_context,
+                tool_context=tool_context,
+                session_summary=session.running_summary,
+                history=session.history,
+            )
+
+            assistant_text = await self.llm_engine.generate_streaming(
+                prompt=prompt,
+                websocket=websocket,
+                session_id=session_id,
+                turn_id=turn_id,
+                latency_tracker=self.latency_tracker,
+            )
+
+            if speak_response:
+                tts_start = time.perf_counter()
+                tts_error: str | None = None
+                try:
+                    await self.synthesizer.synthesize_streaming(assistant_text, websocket, turn_id=turn_id)
+                except Exception as exc:  # noqa: BLE001
+                    tts_error = str(exc)
+                    await self._send_recoverable_error(websocket, f"TTS unavailable for this turn: {tts_error}")
+                await self.latency_tracker.log(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    stage="tts_synthesis",
+                    duration_ms=(time.perf_counter() - tts_start) * 1000.0,
+                    metadata={"success": tts_error is None, "error": tts_error},
+                )
+            else:
+                await self.latency_tracker.log(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    stage="tts_synthesis",
+                    duration_ms=0.0,
+                    metadata={"success": True, "skipped": True, "reason": "text_input"},
+                )
+
+            session.history.append({"role": "user", "content": message})
+            session.history.append({"role": "assistant", "content": assistant_text})
+            session.history = self._truncate_history(session.history, max_turns=6)
+            await self.chat_store.append_message(session_id, turn_id, "assistant", assistant_text)
+            await self.session_store.touch_session(session_id, user_id=session.user_id, turn_count=session.turn_count)
+            await self._maybe_refresh_summary(session)
+
+            asyncio.create_task(self._log_interaction_async(session, assistant_text[:500]))
+        except Exception as exc:  # noqa: BLE001
+            error_message = str(exc)
+            await self._send_recoverable_error(websocket, f"Server error: {error_message}")
+            await self.latency_tracker.log(
+                session_id=session_id,
+                turn_id=turn_id,
+                stage="turn_error",
+                duration_ms=(time.perf_counter() - end_to_end_start) * 1000.0,
+                metadata={"error": error_message, "recoverable": True},
+            )
+            return {
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "error": error_message,
+                "recoverable": True,
+            }
 
         end_to_end_ms = (time.perf_counter() - end_to_end_start) * 1000.0
         await self.latency_tracker.log(
@@ -314,12 +489,6 @@ class ConversationManager:
             stage="end_to_end",
             duration_ms=end_to_end_ms,
         )
-
-        session.history.append({"role": "user", "content": message})
-        session.history.append({"role": "assistant", "content": assistant_text})
-        session.history = self._truncate_history(session.history, max_turns=6)
-
-        asyncio.create_task(self._log_interaction_async(session, assistant_text[:500]))
 
         breakdown = await self.latency_tracker.get_turn_breakdown(session_id, turn_id)
         return breakdown
@@ -332,10 +501,12 @@ class ConversationManager:
         audio_format: str | None = None,
     ) -> dict[str, Any]:
         """Process one audio turn: STT -> text pipeline -> TTS output."""
-        session = self._get_or_create_session(session_id)
+        session = await self._load_or_create_session(session_id)
         session.turn_count += 1
         turn_id = session.turn_count
         turn_start = time.perf_counter()
+
+        await self.session_store.touch_session(session_id, user_id=session.user_id, turn_count=session.turn_count)
 
         async with self.latency_tracker.measure(session_id, turn_id, "stt_transcription"):
             text, duration_ms = await self.transcriber.transcribe(audio_bytes, format_hint=audio_format)

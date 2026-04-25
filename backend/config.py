@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     # Session
     session_timeout_minutes: int = Field(default=30, alias="SESSION_TIMEOUT_MINUTES")
     max_sessions: int = Field(default=50, alias="MAX_SESSIONS")
+    max_concurrent_turns: int = Field(default=4, alias="MAX_CONCURRENT_TURNS")
+    turn_queue_timeout_seconds: float = Field(default=5.0, alias="TURN_QUEUE_TIMEOUT_SECONDS")
 
     # Logging
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
@@ -86,6 +88,11 @@ class Settings(BaseSettings):
     def latency_db_path(self) -> Path:
         """Return absolute path to latency SQLite database."""
         return self.data_dir / "latency.db"
+
+    @property
+    def conversation_db_path(self) -> Path:
+        """Return absolute path to session/chat SQLite database."""
+        return self.data_dir / "conversation.db"
 
     @property
     def crm_db_path(self) -> Path:

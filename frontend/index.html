@@ -89,6 +89,13 @@
       min-height: 0;
     }
 
+    .sidebar-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-height: 0;
+    }
+
     .panel {
       background: linear-gradient(180deg, rgba(21, 29, 52, 0.95), rgba(12, 18, 32, 0.95));
       border: 1px solid var(--line);
@@ -115,6 +122,93 @@
       overflow: auto;
       font-family: 'IBM Plex Mono', monospace;
       font-size: 12px;
+    }
+
+    .session-toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 12px;
+      border-bottom: 1px solid rgba(0, 212, 255, 0.14);
+    }
+
+    .session-list {
+      padding: 10px;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 0;
+      flex: 1;
+    }
+
+    .session-item {
+      border: 1px solid rgba(151, 166, 192, 0.22);
+      background: rgba(12, 18, 32, 0.82);
+      border-radius: 12px;
+      padding: 10px;
+      cursor: pointer;
+      transition: transform .15s ease, border-color .15s ease, background .15s ease;
+    }
+
+    .session-item:hover {
+      transform: translateY(-1px);
+      border-color: rgba(0, 212, 255, 0.4);
+    }
+
+    .session-item.active {
+      border-color: rgba(0, 212, 255, 0.55);
+      background: rgba(0, 212, 255, 0.12);
+    }
+
+    .session-item-title {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      margin-bottom: 4px;
+      word-break: break-all;
+    }
+
+    .session-item-meta {
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .session-item-summary {
+      margin-top: 6px;
+      font-size: 11px;
+      color: #c7d4e7;
+      line-height: 1.3;
+      opacity: 0.9;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .chat-meta {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .chat-summary {
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(0, 212, 255, 0.14);
+      font-size: 12px;
+      color: #dbe6f8;
+      background: rgba(0, 212, 255, 0.06);
+      line-height: 1.35;
+      min-height: 38px;
+      white-space: pre-wrap;
     }
 
     .latency-row { margin-bottom: 10px; }
@@ -280,6 +374,7 @@
         grid-template-rows: auto minmax(300px, 1fr) auto;
       }
       .panel { min-height: 220px; }
+      .sidebar-stack { gap: 14px; }
     }
   </style>
 </head>
@@ -292,11 +387,21 @@
 
     <main class="main">
       <section class="panel">
-        <div class="panel-header">Latency Dashboard</div>
-        <div id="latencyContent" class="latency-content"></div>
+        <div class="panel-header">Sessions</div>
+        <div class="session-toolbar">
+          <button id="newSessionBtn" class="btn">New Chat</button>
+          <button id="refreshSessionsBtn" class="btn">Refresh</button>
+          <button id="refreshSummaryBtn" class="btn">Refresh Summary</button>
+        </div>
+        <div id="sessionList" class="session-list"></div>
       </section>
 
       <section class="panel chat-body">
+        <div class="chat-meta">
+          <span id="activeSessionLabel">Session: loading...</span>
+          <span id="activeSessionCount">0 messages</span>
+        </div>
+        <div id="activeSessionSummary" class="chat-summary">Summary: not available yet.</div>
         <div id="messages" class="messages"></div>
         <div class="composer">
           <input id="textInput" placeholder="Ask about SEC filings, prices, news, or calculations..." />
@@ -308,10 +413,17 @@
         </div>
       </section>
 
-      <section class="panel">
-        <div class="panel-header">Market Sidebar</div>
-        <div id="marketContent" class="market-content"></div>
-      </section>
+      <div class="sidebar-stack">
+        <section class="panel">
+          <div class="panel-header">Latency Dashboard</div>
+          <div id="latencyContent" class="latency-content"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">Market Sidebar</div>
+          <div id="marketContent" class="market-content"></div>
+        </section>
+      </div>
     </main>
   </div>
 
@@ -325,6 +437,13 @@
     const marketEl = document.getElementById('marketContent');
     const statusDot = document.getElementById('statusDot');
     const statusText = document.getElementById('statusText');
+    const sessionListEl = document.getElementById('sessionList');
+    const newSessionBtn = document.getElementById('newSessionBtn');
+    const refreshSessionsBtn = document.getElementById('refreshSessionsBtn');
+    const refreshSummaryBtn = document.getElementById('refreshSummaryBtn');
+    const activeSessionLabel = document.getElementById('activeSessionLabel');
+    const activeSessionCount = document.getElementById('activeSessionCount');
+    const activeSessionSummary = document.getElementById('activeSessionSummary');
 
     const SESSION_KEY = 'sec_assistant_session_id';
     let sessionId = localStorage.getItem(SESSION_KEY);
@@ -343,6 +462,8 @@
     const audioQueue = [];
     let isPlayingAudio = false;
     const latencyHistory = [];
+    let sessionsCache = [];
+    let suppressReconnect = false;
 
     function pickRecorderMimeType() {
       const preferred = [
@@ -374,7 +495,7 @@
     }
 
     function backendHost() {
-      const backendPort = '8000';
+      const backendPort = '8001';
 
       if (location.protocol === 'file:') {
         return `127.0.0.1:${backendPort}`;
@@ -398,6 +519,7 @@
     }
 
     function connectSocket() {
+      suppressReconnect = false;
       ws = new WebSocket(wsUrl());
 
       ws.onopen = () => {
@@ -407,6 +529,7 @@
 
       ws.onclose = () => {
         setConnectionState(false);
+        if (suppressReconnect) return;
         setTimeout(connectSocket, reconnectDelay);
         reconnectDelay = Math.min(reconnectDelay * 2, 6000);
       };
@@ -417,6 +540,163 @@
         const msg = JSON.parse(event.data);
         handleServerMessage(msg);
       };
+    }
+
+    function disconnectSocket() {
+      suppressReconnect = true;
+      if (ws && ws.readyState !== WebSocket.CLOSED) {
+        try {
+          ws.close();
+        } catch (error) {
+          console.warn('Socket close failed', error);
+        }
+      }
+    }
+
+    async function ensureServerSession(id) {
+      try {
+        await fetch(`http://${backendHost()}/api/sessions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: id })
+        });
+      } catch (error) {
+        console.warn('Failed to create session', error);
+      }
+    }
+
+    async function fetchSessions() {
+      try {
+        const response = await fetch(`http://${backendHost()}/api/sessions`);
+        if (!response.ok) return [];
+        return await response.json();
+      } catch (error) {
+        console.warn('Failed to fetch sessions', error);
+        return [];
+      }
+    }
+
+    function renderSessionList() {
+      sessionListEl.innerHTML = '';
+      if (!sessionsCache.length) {
+        sessionListEl.innerHTML = '<div class="muted">No saved sessions yet.</div>';
+        return;
+      }
+
+      sessionsCache.forEach((session) => {
+        const item = document.createElement('div');
+        item.className = `session-item${session.session_id === sessionId ? ' active' : ''}`;
+        item.innerHTML = `
+          <div class="session-item-title">${session.session_id}</div>
+          <div class="session-item-meta">
+            <span>${Number(session.turn_count || 0)} turns</span>
+            <span>${String(session.last_activity || '').slice(0, 19).replace('T', ' ')}</span>
+          </div>
+          <div class="session-item-summary">${formatSummary(session.summary)}</div>
+        `;
+        item.addEventListener('click', () => switchSession(session.session_id));
+        sessionListEl.appendChild(item);
+      });
+    }
+
+    function formatSummary(summary) {
+      const value = String(summary || '').trim();
+      if (!value) return 'No summary yet.';
+      return formatMessage(value);
+    }
+
+    function updateActiveSummary(summary) {
+      activeSessionSummary.innerHTML = `Summary: ${formatSummary(summary)}`;
+    }
+
+    function updateActiveSessionMetaFromCache() {
+      const active = sessionsCache.find((session) => session.session_id === sessionId);
+      if (!active) return;
+      updateActiveSummary(active.summary);
+      activeSessionLabel.textContent = `Session: ${active.session_id}`;
+    }
+
+    async function loadSessionHistory(id) {
+      try {
+        const response = await fetch(`http://${backendHost()}/api/sessions/${encodeURIComponent(id)}/history`);
+        if (!response.ok) {
+          messagesEl.innerHTML = '';
+          activeSessionLabel.textContent = `Session: ${id}`;
+          activeSessionCount.textContent = '0 messages';
+          updateActiveSummary('');
+          return;
+        }
+
+        const payload = await response.json();
+        const messages = payload.messages || [];
+        messagesEl.innerHTML = '';
+
+        messages.forEach((message) => {
+          addBubble(message.role, message.content);
+        });
+
+        const session = payload.session || {};
+        activeSessionLabel.textContent = `Session: ${session.session_id || id}`;
+        activeSessionCount.textContent = `${messages.length} messages`;
+        updateActiveSummary(session.summary || '');
+      } catch (error) {
+        console.warn('Failed to load session history', error);
+      }
+    }
+
+    async function refreshSessions() {
+      sessionsCache = await fetchSessions();
+      renderSessionList();
+    }
+
+    async function refreshActiveSummary() {
+      if (!sessionId) return;
+      refreshSummaryBtn.disabled = true;
+      try {
+        const response = await fetch(
+          `http://${backendHost()}/api/sessions/${encodeURIComponent(sessionId)}/summary/refresh`,
+          { method: 'POST' }
+        );
+        if (!response.ok) {
+          addBubble('assistant', 'Error: Unable to refresh summary for this session.');
+          return;
+        }
+
+        const payload = await response.json();
+        const summary = payload.summary || payload.session?.summary || '';
+        updateActiveSummary(summary);
+        await refreshSessions();
+        updateActiveSessionMetaFromCache();
+      } catch (error) {
+        addBubble('assistant', `Error: Summary refresh failed (${error.message || error}).`);
+      } finally {
+        refreshSummaryBtn.disabled = false;
+      }
+    }
+
+    async function switchSession(id) {
+      if (!id || id === sessionId) return;
+      disconnectSocket();
+      sessionId = id;
+      localStorage.setItem(SESSION_KEY, sessionId);
+      await ensureServerSession(sessionId);
+      await loadSessionHistory(sessionId);
+      await refreshSessions();
+      connectSocket();
+    }
+
+    async function createNewSession() {
+      const nextSessionId = crypto.randomUUID();
+      disconnectSocket();
+      sessionId = nextSessionId;
+      localStorage.setItem(SESSION_KEY, sessionId);
+      await ensureServerSession(sessionId);
+      messagesEl.innerHTML = '';
+      activeSessionLabel.textContent = `Session: ${sessionId}`;
+      activeSessionCount.textContent = '0 messages';
+      updateActiveSummary('');
+      await refreshSessions();
+      connectSocket();
     }
 
     function addBubble(role, text) {
@@ -541,6 +821,7 @@
       if (msg.type === 'turn_complete') {
         renderLatency(msg.latency_breakdown || {});
         currentAssistantBubble = null;
+        refreshSessions().then(() => updateActiveSessionMetaFromCache());
         return;
       }
 
@@ -629,6 +910,16 @@
 
     renderMarketSidebar();
     connectSocket();
+
+    (async () => {
+      await ensureServerSession(sessionId);
+      await refreshSessions();
+      await loadSessionHistory(sessionId);
+    })();
+
+    newSessionBtn.addEventListener('click', createNewSession);
+    refreshSessionsBtn.addEventListener('click', refreshSessions);
+    refreshSummaryBtn.addEventListener('click', refreshActiveSummary);
   </script>
 </body>
 </html>
