@@ -15,6 +15,7 @@ from fastapi.responses import Response
 
 from backend.config import get_settings
 from backend.chat_store import ChatStore
+from backend.concurrency_limiter import TurnConcurrencyLimiter
 from backend.conversation_manager import ConversationManager
 from backend.domain_classifier import DomainClassifier
 from backend.latency_tracker import LatencyTracker
@@ -128,6 +129,10 @@ async def on_startup() -> None:
         session_store=session_store,
         chat_store=chat_store,
         domain_classifier=domain_classifier,
+    )
+    app.state.turn_limiter = TurnConcurrencyLimiter(
+        max_concurrent=settings.max_concurrent_turns,
+        queue_timeout_seconds=settings.turn_queue_timeout_seconds,
     )
 
     async def _run_warmup(name: str, coro: Any) -> tuple[str, float, str | None]:
@@ -293,11 +298,26 @@ async def trigger_indexing() -> dict[str, Any]:
     }
 
 
+@app.get("/api/metrics/concurrency")
+async def get_concurrency_metrics() -> dict[str, Any]:
+    """Return current concurrency limiter state and metrics."""
+    limiter: TurnConcurrencyLimiter = app.state.turn_limiter
+    metrics = limiter.get_metrics()
+    return {
+        "max_concurrent_turns": metrics.max_concurrent_turns,
+        "current_active_turns": metrics.current_active_turns,
+        "queued_sessions": metrics.queued_sessions,
+        "total_turns_processed": metrics.total_turns_processed,
+        "total_wait_ms": metrics.total_wait_ms,
+    }
+
+
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
     """Main real-time conversation websocket for text and voice messages."""
     await websocket.accept()
     manager: ConversationManager = app.state.manager
+    limiter: TurnConcurrencyLimiter = app.state.turn_limiter
 
     try:
         while True:
@@ -307,21 +327,26 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
 
                 if msg_type == "text_input":
                     message = str(payload.get("message", "")).strip()
-                    breakdown = await manager.handle_text_turn(
-                        session_id=session_id,
-                        message=message,
-                        websocket=websocket,
-                        speak_response=False,
-                    )
-                    if breakdown.get("error"):
-                        continue
-                    await websocket.send_json(
-                        {
-                            "type": "turn_complete",
-                            "turn_id": breakdown["turn_id"],
-                            "latency_breakdown": breakdown.get("stages", {}),
-                        }
-                    )
+                    wait_ms = await limiter.acquire_turn(session_id)
+                    try:
+                        breakdown = await manager.handle_text_turn(
+                            session_id=session_id,
+                            message=message,
+                            websocket=websocket,
+                            speak_response=False,
+                        )
+                        if breakdown.get("error"):
+                            continue
+                        await websocket.send_json(
+                            {
+                                "type": "turn_complete",
+                                "turn_id": breakdown["turn_id"],
+                                "latency_breakdown": breakdown.get("stages", {}),
+                                "queue_wait_ms": wait_ms,
+                            }
+                        )
+                    finally:
+                        limiter.release_turn()
                     continue
 
                 if msg_type == "audio_input":
@@ -349,21 +374,26 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
                         continue
 
                     audio_format = str(payload.get("format", "")).strip().lower() or None
-                    breakdown = await manager.handle_audio_turn(
-                        session_id=session_id,
-                        audio_bytes=audio_bytes,
-                        websocket=websocket,
-                        audio_format=audio_format,
-                    )
-                    if breakdown.get("error"):
-                        continue
-                    await websocket.send_json(
-                        {
-                            "type": "turn_complete",
-                            "turn_id": breakdown["turn_id"],
-                            "latency_breakdown": breakdown.get("stages", {}),
-                        }
-                    )
+                    wait_ms = await limiter.acquire_turn(session_id)
+                    try:
+                        breakdown = await manager.handle_audio_turn(
+                            session_id=session_id,
+                            audio_bytes=audio_bytes,
+                            websocket=websocket,
+                            audio_format=audio_format,
+                        )
+                        if breakdown.get("error"):
+                            continue
+                        await websocket.send_json(
+                            {
+                                "type": "turn_complete",
+                                "turn_id": breakdown["turn_id"],
+                                "latency_breakdown": breakdown.get("stages", {}),
+                                "queue_wait_ms": wait_ms,
+                            }
+                        )
+                    finally:
+                        limiter.release_turn()
                     continue
 
                 await websocket.send_json(
