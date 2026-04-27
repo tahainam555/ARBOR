@@ -1,40 +1,73 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   Cpu,
   Database,
   Gauge,
   Radio,
-  Sparkles,
   Zap,
   ChevronRight,
   Network,
   ListTodo,
   X,
 } from "lucide-react";
+import { backendBaseUrl } from "@/lib/backend";
 
 interface IntelligencePanelProps {
   open: boolean;
   onClose: () => void;
 }
 
-export function IntelligencePanel({ open, onClose }: IntelligencePanelProps) {
-  const panelRef = useRef<HTMLDivElement>(null);
+type GlobalLatency = Record<string, number>;
 
-  // ESC to close + lock scroll while open
+type ConcurrencyMetrics = {
+  max_concurrent_turns: number;
+  current_active_turns: number;
+  queued_sessions: number;
+  total_turns_processed: number;
+  total_wait_ms: number;
+};
+
+export function IntelligencePanel({ open, onClose }: IntelligencePanelProps) {
+  const [latency, setLatency] = useState<GlobalLatency>({});
+  const [concurrency, setConcurrency] = useState<ConcurrencyMetrics | null>(null);
+
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+
+    const fetchMetrics = async () => {
+      try {
+        const [latRes, concRes] = await Promise.all([
+          fetch(`${backendBaseUrl()}/api/latency/global`),
+          fetch(`${backendBaseUrl()}/api/metrics/concurrency`),
+        ]);
+
+        if (latRes.ok) {
+          const lat = (await latRes.json()) as { averages?: GlobalLatency };
+          setLatency(lat.averages ?? {});
+        }
+
+        if (concRes.ok) {
+          const conc = (await concRes.json()) as ConcurrencyMetrics;
+          setConcurrency(conc);
+        }
+      } catch {
+        // Ignore transient metric polling failures.
+      }
     };
-    window.addEventListener("keydown", onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [open, onClose]);
+
+    fetchMetrics();
+    const timer = window.setInterval(fetchMetrics, 4000);
+    return () => window.clearInterval(timer);
+  }, [open]);
+
+  const p95Like = useMemo(() => {
+    const values = Object.values(latency).filter((v) => Number.isFinite(v));
+    if (values.length === 0) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95));
+    return sorted[idx];
+  }, [latency]);
 
   return (
     <div
@@ -44,7 +77,6 @@ export function IntelligencePanel({ open, onClose }: IntelligencePanelProps) {
         open ? "pointer-events-auto" : "pointer-events-none",
       ].join(" ")}
     >
-      {/* Backdrop: blur + dim */}
       <button
         aria-label="Close intelligence panel"
         onClick={onClose}
@@ -53,12 +85,9 @@ export function IntelligencePanel({ open, onClose }: IntelligencePanelProps) {
           "absolute inset-0 cursor-default bg-background/40 backdrop-blur-md transition-all duration-500",
           open ? "opacity-100" : "opacity-0",
         ].join(" ")}
-        style={{ WebkitBackdropFilter: "blur(14px) saturate(140%)" }}
       />
 
-      {/* Slide-over panel */}
       <aside
-        ref={panelRef}
         role="dialog"
         aria-label="Intelligence observability panel"
         className={[
@@ -67,33 +96,10 @@ export function IntelligencePanel({ open, onClose }: IntelligencePanelProps) {
           "transition-transform duration-500",
           open ? "translate-x-0" : "translate-x-full",
         ].join(" ")}
-        style={{
-          transitionTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)",
-          backdropFilter: "blur(24px) saturate(160%)",
-          WebkitBackdropFilter: "blur(24px) saturate(160%)",
-        }}
       >
-        {/* Soft inner glow border */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 rounded-l-2xl"
-          style={{
-            boxShadow:
-              "inset 1px 0 0 oklch(0.78 0.16 200 / 0.08), inset 0 1px 0 oklch(1 0 0 / 0.04)",
-          }}
-        />
-        {/* Ambient gradient accent */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -top-32 right-0 h-64 w-64 rounded-full bg-primary/10 blur-3xl"
-        />
-
-        {/* Header */}
         <div className="hairline-b sticky top-0 z-10 flex h-14 items-center gap-2 bg-surface/50 px-5 backdrop-blur-xl">
           <Activity className="h-3.5 w-3.5 text-primary" />
-          <span className="font-display text-[13px] font-medium text-foreground">
-            Intelligence
-          </span>
+          <span className="font-display text-[13px] font-medium text-foreground">Intelligence</span>
           <span className="ml-3 flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
             <span className="h-1.5 w-1.5 rounded-full bg-success animate-blink" />
             live
@@ -108,107 +114,66 @@ export function IntelligencePanel({ open, onClose }: IntelligencePanelProps) {
         </div>
 
         <div className="relative space-y-4 overflow-y-auto px-4 py-5">
-          {/* Hero metric */}
           <PanelCard>
             <div className="flex items-start justify-between">
               <div>
                 <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                  p95 latency
+                  latency snapshot
                 </div>
                 <div className="mt-1 flex items-baseline gap-1">
                   <span className="font-display text-3xl font-semibold text-foreground">
-                    142
+                    {Number(p95Like).toFixed(0)}
                   </span>
                   <span className="font-mono text-xs text-muted-foreground">ms</span>
                 </div>
-                <div className="mt-1 flex items-center gap-1.5 text-[11px]">
-                  <span className="text-success">▼ 18%</span>
-                  <span className="text-muted-foreground">vs 24h</span>
-                </div>
+                <div className="mt-1 text-[11px] text-muted-foreground">approx p95 from stage averages</div>
               </div>
               <Gauge className="h-4 w-4 text-primary" />
             </div>
-            <Sparkline />
           </PanelCard>
 
-          {/* Metric grid */}
           <div className="grid grid-cols-2 gap-2.5">
-            <MiniMetric icon={<Database className="h-3 w-3" />} label="Retrieval" value="38" unit="ms" trend="−6%" good />
-            <MiniMetric icon={<Cpu className="h-3 w-3" />} label="Memory" value="62" unit="%" trend="stable" />
-            <MiniMetric icon={<Zap className="h-3 w-3" />} label="Throughput" value="2.4k" unit="t/s" trend="+12%" good />
-            <MiniMetric icon={<Radio className="h-3 w-3" />} label="WebSocket" value="14" unit="ms" trend="ok" good />
+            <MiniMetric icon={<Database className="h-3 w-3" />} label="Stages" value={`${Object.keys(latency).length}`} unit="count" trend="live" good />
+            <MiniMetric icon={<Cpu className="h-3 w-3" />} label="Queue" value={`${concurrency?.queued_sessions ?? 0}`} unit="sessions" trend="live" />
+            <MiniMetric icon={<Zap className="h-3 w-3" />} label="Turns" value={`${concurrency?.total_turns_processed ?? 0}`} unit="total" trend="live" good />
+            <MiniMetric icon={<Radio className="h-3 w-3" />} label="Active" value={`${concurrency?.current_active_turns ?? 0}`} unit="turns" trend={`max ${concurrency?.max_concurrent_turns ?? 0}`} good />
           </div>
 
-          {/* Reasoning */}
-          <PanelCard
-            title="AI reasoning"
-            icon={<Sparkles className="h-3 w-3 text-primary" />}
-            right={<span className="font-mono text-[10px] text-muted-foreground">step 4 / 4</span>}
-          >
-            <ul className="space-y-2 text-[12px]">
-              {[
-                { label: "Parse query intent", state: "done", time: "84ms" },
-                { label: "Retrieve context (4 sources)", state: "done", time: "312ms" },
-                { label: "Cross-reference memory", state: "done", time: "128ms" },
-                { label: "Synthesize response", state: "active", time: "—" },
-              ].map((step) => (
-                <li key={step.label} className="flex items-center gap-2.5">
-                  <StepDot state={step.state as "done" | "active"} />
-                  <span className={step.state === "active" ? "text-foreground" : "text-muted-foreground"}>
-                    {step.label}
-                  </span>
-                  <span className="ml-auto font-mono text-[10px] text-muted-foreground">{step.time}</span>
-                </li>
-              ))}
-            </ul>
-          </PanelCard>
-
-          {/* Sessions */}
-          <PanelCard
-            title="Active sessions"
-            icon={<Network className="h-3 w-3 text-primary" />}
-            right={<span className="font-mono text-[10px] text-muted-foreground">7</span>}
-          >
+          <PanelCard title="Latency by stage" icon={<Network className="h-3 w-3 text-primary" />}>
             <div className="space-y-2.5">
-              {[
-                { name: "arbor · prod-eu", load: 72, color: "bg-primary" },
-                { name: "arbor · prod-us", load: 54, color: "bg-accent" },
-                { name: "arbor · staging", load: 28, color: "bg-success" },
-              ].map((s) => (
-                <div key={s.name}>
+              {Object.entries(latency).map(([name, value]) => (
+                <div key={name}>
                   <div className="mb-1 flex items-center justify-between text-[11px]">
-                    <span className="font-mono text-muted-foreground">{s.name}</span>
-                    <span className="font-mono text-foreground">{s.load}%</span>
+                    <span className="font-mono text-muted-foreground">{name}</span>
+                    <span className="font-mono text-foreground">{Number(value).toFixed(1)} ms</span>
                   </div>
                   <div className="h-1 overflow-hidden rounded-full bg-secondary/60">
                     <div
-                      className={`h-full rounded-full ${s.color} shadow-glow-sm`}
-                      style={{ width: `${s.load}%` }}
+                      className="h-full rounded-full bg-primary shadow-glow-sm"
+                      style={{ width: `${Math.min(100, Number(value) / 12)}%` }}
                     />
                   </div>
                 </div>
               ))}
+              {Object.keys(latency).length === 0 && (
+                <div className="text-[12px] text-muted-foreground">No latency data yet.</div>
+              )}
             </div>
           </PanelCard>
 
-          {/* Queue health */}
           <PanelCard title="Queue health" icon={<ListTodo className="h-3 w-3 text-primary" />}>
             <div className="grid grid-cols-3 gap-2 text-center">
-              {[
-                { label: "Pending", value: "12", color: "text-foreground" },
-                { label: "Running", value: "3", color: "text-primary" },
-                { label: "Failed", value: "0", color: "text-success" },
-              ].map((q) => (
-                <div key={q.label}>
-                  <div className={`font-display text-xl font-semibold ${q.color}`}>{q.value}</div>
-                  <div className="mt-0.5 text-[10px] text-muted-foreground">{q.label}</div>
-                </div>
-              ))}
+              <MetricBlock label="Pending" value={`${concurrency?.queued_sessions ?? 0}`} color="text-foreground" />
+              <MetricBlock label="Running" value={`${concurrency?.current_active_turns ?? 0}`} color="text-primary" />
+              <MetricBlock label="Capacity" value={`${concurrency?.max_concurrent_turns ?? 0}`} color="text-success" />
+            </div>
+            <div className="mt-3 text-[11px] text-muted-foreground">
+              Total wait: {Number(concurrency?.total_wait_ms ?? 0).toFixed(1)} ms
             </div>
           </PanelCard>
 
           <button className="group flex w-full items-center justify-between rounded-xl border border-border bg-card/40 px-4 py-2.5 text-[12px] text-muted-foreground transition hover:bg-card/70 hover:text-foreground">
-            Open full observability
+            Metrics endpoint connected
             <ChevronRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
           </button>
         </div>
@@ -220,12 +185,10 @@ export function IntelligencePanel({ open, onClose }: IntelligencePanelProps) {
 function PanelCard({
   title,
   icon,
-  right,
   children,
 }: {
   title?: string;
   icon?: React.ReactNode;
-  right?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -234,7 +197,6 @@ function PanelCard({
         <div className="mb-3 flex items-center gap-1.5">
           {icon}
           <span className="text-[11px] font-medium text-foreground">{title}</span>
-          {right && <span className="ml-auto">{right}</span>}
         </div>
       )}
       {children}
@@ -274,59 +236,11 @@ function MiniMetric({
   );
 }
 
-function StepDot({ state }: { state: "done" | "active" }) {
-  if (state === "active") {
-    return (
-      <span className="relative flex h-2 w-2 shrink-0">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-50" />
-        <span className="relative inline-flex h-2 w-2 rounded-full bg-primary shadow-glow-sm" />
-      </span>
-    );
-  }
-  return <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-success/70" />;
-}
-
-function Sparkline() {
-  const points = [42, 38, 50, 44, 36, 48, 40, 32, 38, 30, 34, 28, 30, 24, 26];
-  const w = 280;
-  const h = 56;
-  const max = Math.max(...points);
-  const min = Math.min(...points);
-  const step = w / (points.length - 1);
-  const path = points
-    .map((p, i) => {
-      const x = i * step;
-      const y = h - ((p - min) / (max - min)) * h;
-      return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-  const area = `${path} L${w},${h} L0,${h} Z`;
-
+function MetricBlock({ label, value, color }: { label: string; value: string; color: string }) {
   return (
-    <div className="mt-3">
-      <svg viewBox={`0 0 ${w} ${h}`} className="h-14 w-full overflow-visible">
-        <defs>
-          <linearGradient id="spark-stroke" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="oklch(0.7 0.14 220)" />
-            <stop offset="100%" stopColor="oklch(0.85 0.14 190)" />
-          </linearGradient>
-          <linearGradient id="spark-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="oklch(0.78 0.16 200 / 0.35)" />
-            <stop offset="100%" stopColor="oklch(0.78 0.16 200 / 0)" />
-          </linearGradient>
-        </defs>
-        <path d={area} fill="url(#spark-fill)" />
-        <path
-          d={path}
-          fill="none"
-          stroke="url(#spark-stroke)"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="animate-graph"
-          style={{ filter: "drop-shadow(0 0 6px oklch(0.78 0.16 200 / 0.6))" }}
-        />
-      </svg>
+    <div>
+      <div className={`font-display text-xl font-semibold ${color}`}>{value}</div>
+      <div className="mt-0.5 text-[10px] text-muted-foreground">{label}</div>
     </div>
   );
 }
