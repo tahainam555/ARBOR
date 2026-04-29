@@ -8,6 +8,7 @@ import {
   Layers,
   Command,
   RefreshCw,
+  Trash2,
 } from "lucide-react";
 import { backendBaseUrl, getCurrentSessionId, setCurrentSessionId } from "@/lib/backend";
 
@@ -35,6 +36,7 @@ export function Sidebar() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string>("");
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const dispatchSessionChanged = useCallback((sessionId: string) => {
     setCurrentSessionId(sessionId);
@@ -87,6 +89,34 @@ export function Sidebar() {
     }
   }, [dispatchSessionChanged, refreshSessions]);
 
+  const deleteSession = useCallback(
+    async (sessionId: string) => {
+      setError(null);
+      try {
+        const res = await fetch(`${backendBaseUrl()}/api/sessions/${sessionId}`, {
+          method: "DELETE",
+        });
+        if (!res.ok) throw new Error(`Failed to delete session (${res.status})`);
+        
+        setDeleteConfirmId(null);
+        await refreshSessions();
+        
+        // If deleted session was active, switch to another
+        if (sessionId === activeSessionId) {
+          const remaining = sessions.filter((s) => s.session_id !== sessionId);
+          if (remaining.length > 0) {
+            dispatchSessionChanged(remaining[0].session_id);
+          } else {
+            await createSession();
+          }
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unable to delete session");
+      }
+    },
+    [activeSessionId, sessions, dispatchSessionChanged, refreshSessions, createSession],
+  );
+
   useEffect(() => {
     setMounted(true);
     setActiveSessionId(getCurrentSessionId());
@@ -121,7 +151,7 @@ export function Sidebar() {
         </div>
         <div className="flex flex-1 items-center gap-1.5">
           <span className="font-display text-[15px] font-semibold tracking-tight text-foreground">
-            SEC Assistant
+            ARBOR-AI
           </span>
         </div>
       </div>
@@ -166,22 +196,55 @@ export function Sidebar() {
         <ul className="space-y-1">
           {filteredSessions.map((item) => {
             const isActive = item.session_id === activeSessionId;
+            const isConfirming = deleteConfirmId === item.session_id;
             return (
               <li key={item.session_id}>
-                <button onClick={() => dispatchSessionChanged(item.session_id)} className={navItemClass(isActive)}>
-                  <MessageSquare
-                    className={`h-3.5 w-3.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground/70"}`}
-                    strokeWidth={1.75}
-                  />
-                  <div className="min-w-0 flex-1 text-left">
-                    <div className="truncate text-[12px] text-foreground">
-                      {item.title || item.session_id.slice(0, 12)}
-                    </div>
-                    <div className="truncate text-[10px] text-muted-foreground">
-                      {formatTime(item.last_active)} | turns {item.turn_count ?? 0}
+                {isConfirming ? (
+                  <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-2.5">
+                    <div className="text-[11px] text-destructive mb-2">Delete this conversation?</div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => void deleteSession(item.session_id)}
+                        className="flex-1 rounded-md bg-destructive/60 hover:bg-destructive px-2 py-1 text-[10px] font-medium text-white transition"
+                      >
+                        Delete
+                      </button>
+                      <button
+                        onClick={() => setDeleteConfirmId(null)}
+                        className="flex-1 rounded-md border border-border bg-secondary/40 hover:bg-secondary/60 px-2 py-1 text-[10px] font-medium text-foreground transition"
+                      >
+                        Cancel
+                      </button>
                     </div>
                   </div>
-                </button>
+                ) : (
+                  <div className="group flex items-center gap-1">
+                    <button
+                      onClick={() => dispatchSessionChanged(item.session_id)}
+                      className={`flex-1 ${navItemClass(isActive)}`}
+                    >
+                      <MessageSquare
+                        className={`h-3.5 w-3.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground/70"}`}
+                        strokeWidth={1.75}
+                      />
+                      <div className="min-w-0 flex-1 text-left">
+                        <div className="truncate text-[12px] text-foreground">
+                          {item.title || item.session_id.slice(0, 12)}
+                        </div>
+                        <div className="truncate text-[10px] text-muted-foreground">
+                          {formatTime(item.last_active)} | turns {item.turn_count ?? 0}
+                        </div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => setDeleteConfirmId(item.session_id)}
+                      className="rounded-md p-1 text-muted-foreground opacity-0 transition hover:bg-destructive/20 hover:text-destructive group-hover:opacity-100"
+                      aria-label="Delete session"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
               </li>
             );
           })}
@@ -213,7 +276,7 @@ export function Sidebar() {
 
         <div className="mt-3 flex items-center justify-between px-1">
           <div className="leading-tight">
-            <div className="text-[12px] font-medium text-foreground">SEC Assistant</div>
+            <div className="text-[12px] font-medium text-foreground">ARBOR-AI</div>
             <div className="text-[10px] text-muted-foreground">production workspace</div>
           </div>
           <button className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary/20">

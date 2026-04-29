@@ -224,6 +224,7 @@ export function Conversation({ intelligenceOpen, onToggleIntelligence }: Convers
     const unplayedChunks = chunks.slice(playedAudioChunkCountRef.current);
     playedAudioChunkCountRef.current = chunks.length;
 
+    // Play unplayed chunks immediately
     if (unplayedChunks.length > 0) {
       const playbackBlob = new Blob(
         unplayedChunks.map((chunk) => chunk.bytes),
@@ -236,6 +237,7 @@ export function Conversation({ intelligenceOpen, onToggleIntelligence }: Convers
       void playback.play().catch(() => URL.revokeObjectURL(playbackUrl));
     }
 
+    // Store full audio for replay button (don't play it again)
     const blob = new Blob(
       chunks.map((chunk) => chunk.bytes),
       { type: mimeType },
@@ -254,11 +256,10 @@ export function Conversation({ intelligenceOpen, onToggleIntelligence }: Convers
           ),
         );
       }
-      playAudioBlob(base64, mimeType);
     };
     reader.readAsDataURL(blob);
     return "";
-  }, [playAudioBlob]);
+  }, []);
 
   const scheduleReconnect = useCallback(
     (targetSessionId: string) => {
@@ -1102,7 +1103,7 @@ function MessageBubble({
       </div>
       <div className="min-w-0 flex-1">
         <div className="mb-2 flex items-center gap-2 text-[12px] font-medium text-foreground">
-          <span>{isSystem ? "System" : "Assistant"}</span>
+          <span>{isSystem ? "System" : "ARBOR-AI"}</span>
           {!isSystem && audio && (
             <button
               type="button"
