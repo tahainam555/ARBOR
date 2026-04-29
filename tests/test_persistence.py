@@ -27,6 +27,11 @@ async def test_session_store_roundtrip(tmp_path: Path) -> None:
     assert sessions[0]["session_id"] == "session-1"
     assert sessions[0]["summary"] is None
 
+    await store.update_title("session-1", "AAPL Filing Review")
+    titled = await store.get_session("session-1")
+    assert titled is not None
+    assert titled["title"] == "AAPL Filing Review"
+
 
 @pytest.mark.asyncio
 async def test_session_summary_persistence(tmp_path: Path) -> None:
@@ -62,3 +67,26 @@ async def test_chat_store_roundtrip(tmp_path: Path) -> None:
 
     turn_messages = await chat_store.get_turn_messages("session-2", 1)
     assert len(turn_messages) == 2
+
+
+@pytest.mark.asyncio
+async def test_chat_store_audio_roundtrip(tmp_path: Path) -> None:
+    db_path = tmp_path / "conversation.db"
+    session_store = SessionStore(db_path=str(db_path))
+    chat_store = ChatStore(db_path=str(db_path))
+    await session_store.initialize()
+    await chat_store.initialize()
+
+    await session_store.create_session("audio-session")
+    await chat_store.append_message("audio-session", 1, "assistant", "Spoken answer.")
+    await chat_store.save_message_audio(
+        "audio-session",
+        1,
+        "assistant",
+        audio_base64="UklGRg==",
+        mime_type="audio/wav",
+    )
+
+    history = await chat_store.get_history("audio-session", limit=10)
+    assert history[0]["audio"] == "UklGRg=="
+    assert history[0]["mime_type"] == "audio/wav"

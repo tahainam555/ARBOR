@@ -1,7 +1,7 @@
 const SESSION_KEY = "sec_assistant_session_id";
 
 export function backendBaseUrl(): string {
-  const backendPort = "8001";
+  const backendPort = import.meta.env.VITE_BACKEND_PORT ?? "8000";
 
   if (typeof window === "undefined") {
     return `http://127.0.0.1:${backendPort}`;

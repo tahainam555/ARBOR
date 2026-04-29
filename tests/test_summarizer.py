@@ -26,3 +26,10 @@ def test_summarizer_generates_compact_text() -> None:
     assert "Referenced tickers" in summary
     assert "AAPL" in summary
     assert "MSFT" in summary
+
+
+def test_summarizer_generates_short_session_title() -> None:
+    title = ConversationSummarizer.generate_title("Can you summarize AAPL 2023 10-K risk factors?")
+
+    assert title == "Summarize AAPL 2023 10-K Risk"
+    assert len(title) <= 48

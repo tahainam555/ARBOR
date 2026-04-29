@@ -12,6 +12,7 @@ venv/
 
 # Runtime data
 data/*.db
+data/*.log
 chroma_db/
 
 # Temporary test files

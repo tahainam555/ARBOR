@@ -65,3 +65,53 @@ class ConversationSummarizer:
         if len(summary) <= self.max_summary_chars:
             return summary
         return summary[-self.max_summary_chars :]
+
+    @staticmethod
+    def generate_title(text: str, fallback: str = "Conversation") -> str:
+        """Generate a short stable title from the first meaningful user request."""
+        cleaned = re.sub(r"[^\w\s$.-]", " ", text)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        if not cleaned:
+            return fallback
+
+        stopwords = {
+            "a",
+            "an",
+            "and",
+            "about",
+            "can",
+            "could",
+            "for",
+            "from",
+            "give",
+            "help",
+            "how",
+            "i",
+            "in",
+            "is",
+            "me",
+            "of",
+            "on",
+            "please",
+            "show",
+            "tell",
+            "the",
+            "to",
+            "what",
+            "with",
+            "you",
+        }
+        words = [word for word in cleaned.split() if word.lower() not in stopwords]
+        if not words:
+            words = cleaned.split()
+
+        def format_word(word: str) -> str:
+            if re.fullmatch(r"\$?[A-Z]{2,5}", word) or re.search(r"\d", word):
+                return word.upper()
+            return word.capitalize()
+
+        title = " ".join(format_word(word) for word in words[:5]).strip()
+        if not title:
+            return fallback
+
+        return title[:48]

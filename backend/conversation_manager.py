@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -44,6 +45,38 @@ class ConversationSession:
     turn_count: int = 0
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_activity: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class AudioRecordingWebSocket:
+    """Forward websocket payloads while collecting TTS chunks for replay."""
+
+    def __init__(self, websocket: Any) -> None:
+        self.websocket = websocket
+        self.audio_chunks: list[str] = []
+        self.mime_type = "audio/mpeg"
+
+    async def send_json(self, payload: dict[str, Any]) -> None:
+        if payload.get("type") == "audio_chunk":
+            audio = payload.get("audio")
+            if isinstance(audio, str) and audio:
+                self.audio_chunks.append(audio)
+            mime_type = payload.get("mime_type")
+            if isinstance(mime_type, str) and mime_type:
+                self.mime_type = mime_type
+        await self.websocket.send_json(payload)
+
+    def combined_audio_base64(self) -> str:
+        """Return one base64 blob from collected per-chunk audio payloads."""
+        if not self.audio_chunks:
+            return ""
+
+        combined = bytearray()
+        for chunk in self.audio_chunks:
+            try:
+                combined.extend(base64.b64decode(chunk))
+            except Exception:  # noqa: BLE001
+                continue
+        return base64.b64encode(bytes(combined)).decode("ascii") if combined else ""
 
 
 class ConversationManager:
@@ -248,11 +281,11 @@ class ConversationManager:
         history: list[dict[str, str]],
     ) -> str:
         """Build strict llama-3.2 instruct prompt format."""
-        history_text = self._format_history(self._truncate_history(history, max_turns=6))
-        history_text = self._truncate_text_by_token_estimate(history_text, max_tokens=500)
+        history_text = self._format_history(self._truncate_history(history, max_turns=4))
+        history_text = self._truncate_text_by_token_estimate(history_text, max_tokens=350)
         rag_context = self._truncate_text_by_token_estimate(rag_context, max_tokens=2000)
         tool_context = self._truncate_text_by_token_estimate(tool_context, max_tokens=500)
-        summary_context = self._truncate_text_by_token_estimate(session_summary or "No prior session summary.", max_tokens=250)
+        summary_context = self._truncate_text_by_token_estimate(session_summary or "No prior session summary.", max_tokens=450)
 
         prompt = (
             "<|begin_of_text|>\n"
@@ -275,6 +308,44 @@ class ConversationManager:
             "<|start_header_id|>assistant<|end_header_id|>\n"
         )
         return prompt
+
+    @staticmethod
+    def _is_generic_title(title: str | None) -> bool:
+        """Return whether a session title still looks like a placeholder."""
+        if not title:
+            return True
+        normalized = title.strip().lower()
+        return normalized in {"conversation", "new conversation"} or normalized.startswith("conversation ")
+
+    async def _maybe_update_title(self, session: ConversationSession, message: str) -> None:
+        """Persist a concise title from the first meaningful request."""
+        stored = await self.session_store.get_session(session.session_id)
+        if stored is None or not self._is_generic_title(stored.get("title")):
+            return
+
+        title = self.summarizer.generate_title(message)
+        if self._is_generic_title(title):
+            return
+        await self.session_store.update_title(session.session_id, title)
+
+    async def _ensure_summary_before_prompt(self, session: ConversationSession) -> None:
+        """Refresh compact context before generation for longer conversations."""
+        if session.turn_count < 3:
+            return
+
+        history_rows = await self.chat_store.get_history(session.session_id, limit=40)
+        if len(history_rows) <= 8 and session.running_summary:
+            return
+
+        older_rows = history_rows[:-6] if len(history_rows) > 6 else history_rows
+        if not older_rows:
+            return
+
+        history = [{"role": item["role"], "content": item["content"]} for item in older_rows]
+        updated = self.summarizer.summarize(history, previous_summary=session.running_summary)
+        if updated and updated != session.running_summary:
+            session.running_summary = updated
+            await self.session_store.update_summary(session.session_id, updated)
 
     async def _send_recoverable_error(self, websocket: Any, message: str | None = None) -> None:
         """Emit a standard recoverable error payload if the socket is still open."""
@@ -356,6 +427,7 @@ class ConversationManager:
         turn_start = time.perf_counter()
         await self.chat_store.append_message(session_id, turn_id, "user", message)
         await self.session_store.touch_session(session_id, user_id=session.user_id, turn_count=session.turn_count)
+        await self._maybe_update_title(session, message)
 
         if end_to_end_start is None:
             end_to_end_start = turn_start
@@ -411,8 +483,10 @@ class ConversationManager:
             crm_task = asyncio.create_task(self._load_crm_context(session))
             retrieval_task = asyncio.create_task(self._retrieve_chunks(session_id, turn_id, message))
             tools_task = asyncio.create_task(self._run_tools(session_id, turn_id, message))
+            summary_task = asyncio.create_task(self._ensure_summary_before_prompt(session))
 
             crm_context, chunks, tool_result = await asyncio.gather(crm_task, retrieval_task, tools_task)
+            await summary_task
             rag_context = await self.retriever.format_context(chunks)
             tool_context, _ = tool_result
 
@@ -436,11 +510,21 @@ class ConversationManager:
             if speak_response:
                 tts_start = time.perf_counter()
                 tts_error: str | None = None
+                audio_socket = AudioRecordingWebSocket(websocket)
                 try:
-                    await self.synthesizer.synthesize_streaming(assistant_text, websocket, turn_id=turn_id)
+                    await self.synthesizer.synthesize_streaming(assistant_text, audio_socket, turn_id=turn_id)
                 except Exception as exc:  # noqa: BLE001
                     tts_error = str(exc)
                     await self._send_recoverable_error(websocket, f"TTS unavailable for this turn: {tts_error}")
+                audio_base64 = audio_socket.combined_audio_base64()
+                if audio_base64:
+                    await self.chat_store.save_message_audio(
+                        session_id=session_id,
+                        turn_id=turn_id,
+                        role="assistant",
+                        audio_base64=audio_base64,
+                        mime_type=audio_socket.mime_type,
+                    )
                 await self.latency_tracker.log(
                     session_id=session_id,
                     turn_id=turn_id,

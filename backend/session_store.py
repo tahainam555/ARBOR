@@ -176,3 +176,17 @@ class SessionStore:
                 (summary, now, now, now, session_id),
             )
             await conn.commit()
+
+    async def update_title(self, session_id: str, title: str) -> None:
+        """Persist a concise human-readable title for one session."""
+        now = self._now()
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute(
+                """
+                UPDATE sessions
+                SET title = ?, updated_at = ?
+                WHERE session_id = ?
+                """,
+                (title, now, session_id),
+            )
+            await conn.commit()
