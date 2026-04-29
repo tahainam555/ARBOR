@@ -29,11 +29,12 @@ function formatTime(value?: string | null): string {
 }
 
 export function Sidebar() {
+  const [mounted, setMounted] = useState(false);
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeSessionId, setActiveSessionId] = useState<string>(getCurrentSessionId());
+  const [activeSessionId, setActiveSessionId] = useState<string>("");
 
   const dispatchSessionChanged = useCallback((sessionId: string) => {
     setCurrentSessionId(sessionId);
@@ -75,7 +76,7 @@ export function Sidebar() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           session_id: sessionId,
-          title: `Conversation ${new Date().toLocaleTimeString()}`,
+          title: `Conversation`,
         }),
       });
       if (!res.ok) throw new Error(`Failed to create session (${res.status})`);
@@ -87,6 +88,8 @@ export function Sidebar() {
   }, [dispatchSessionChanged, refreshSessions]);
 
   useEffect(() => {
+    setMounted(true);
+    setActiveSessionId(getCurrentSessionId());
     refreshSessions();
 
     const interval = window.setInterval(refreshSessions, 15000);
@@ -108,18 +111,17 @@ export function Sidebar() {
     });
   }, [query, sessions]);
 
+  const currentSessionLabel = mounted && activeSessionId ? activeSessionId.slice(0, 12) : "Ready";
+
   return (
     <aside className="hairline-r relative flex h-full w-[300px] shrink-0 flex-col bg-sidebar/80">
-      <div className="flex h-14 items-center gap-2.5 px-5">
-        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-primary shadow-glow-sm">
-          <Layers className="h-3.5 w-3.5 text-primary-foreground" strokeWidth={2.5} />
+      <div className="flex h-14 items-center gap-3 px-5">
+        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-secondary/40">
+          <Layers className="h-3.5 w-3.5 text-foreground" strokeWidth={2} />
         </div>
         <div className="flex flex-1 items-center gap-1.5">
           <span className="font-display text-[15px] font-semibold tracking-tight text-foreground">
-            ARBOR-AI
-          </span>
-          <span className="rounded-md bg-secondary/80 px-1.5 py-0.5 font-mono text-[9px] font-medium uppercase tracking-wider text-muted-foreground">
-            live
+            SEC Assistant
           </span>
         </div>
       </div>
@@ -127,18 +129,18 @@ export function Sidebar() {
       <div className="px-3 pb-2 pt-1">
         <button
           onClick={createSession}
-          className="group relative flex w-full items-center gap-2 overflow-hidden rounded-lg bg-gradient-primary px-3 py-2.5 text-sm font-medium text-primary-foreground shadow-glow-sm transition hover:shadow-glow"
+          className="group flex w-full items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm font-medium text-foreground transition hover:bg-secondary/60"
         >
-          <Plus className="h-4 w-4" strokeWidth={2.5} />
+          <Plus className="h-4 w-4" strokeWidth={1.75} />
           <span>New conversation</span>
-          <span className="ml-auto flex items-center gap-0.5 rounded-md bg-black/15 px-1.5 py-0.5 font-mono text-[10px]">
-            <Command className="h-2.5 w-2.5" /> N
+          <span className="ml-auto flex items-center gap-1 rounded-md bg-transparent px-1 py-0.5 font-mono text-[10px] text-muted-foreground">
+            <Command className="h-3 w-3" />
           </span>
         </button>
       </div>
 
       <div className="px-3 pb-3">
-        <div className="group relative flex items-center gap-2 rounded-lg border border-border bg-input/40 px-3 py-2 transition focus-within:border-primary/50 focus-within:bg-input/70">
+          <div className="group relative flex items-center gap-2 rounded-md border border-border bg-input/30 px-3 py-2 transition focus-within:border-primary/40 focus-within:bg-input/50">
           <Search className="h-3.5 w-3.5 text-muted-foreground" />
           <input
             type="text"
@@ -147,12 +149,8 @@ export function Sidebar() {
             placeholder="Search sessions"
             className="flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none"
           />
-          <button
-            onClick={refreshSessions}
-            aria-label="Refresh sessions"
-            className="rounded-md p-1 text-muted-foreground transition hover:bg-secondary/60 hover:text-foreground"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+          <button onClick={refreshSessions} aria-label="Refresh sessions" className="rounded-md p-1 text-muted-foreground hover:bg-secondary/20">
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </button>
         </div>
       </div>
@@ -170,10 +168,7 @@ export function Sidebar() {
             const isActive = item.session_id === activeSessionId;
             return (
               <li key={item.session_id}>
-                <button
-                  onClick={() => dispatchSessionChanged(item.session_id)}
-                  className={navItemClass(isActive)}
-                >
+                <button onClick={() => dispatchSessionChanged(item.session_id)} className={navItemClass(isActive)}>
                   <MessageSquare
                     className={`h-3.5 w-3.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground/70"}`}
                     strokeWidth={1.75}
@@ -199,19 +194,16 @@ export function Sidebar() {
       </div>
 
       <div className="hairline-t mt-auto px-3 py-3">
-        <div className="rounded-xl border border-border bg-card/50 p-3">
+        <div className="rounded-md border border-border bg-card/40 p-3">
           <div className="mb-2 flex items-center justify-between">
             <div className="flex items-center gap-1.5">
-              <Database className="h-3 w-3 text-primary" />
+              <Database className="h-3 w-3 text-muted-foreground" />
               <span className="text-[11px] font-medium text-foreground">Session Store</span>
             </div>
             <span className="font-mono text-[10px] text-muted-foreground">{sessions.length}</span>
           </div>
-          <div className="relative h-1 overflow-hidden rounded-full bg-secondary/60">
-            <div
-              className="absolute inset-y-0 left-0 rounded-full bg-gradient-primary shadow-glow-sm"
-              style={{ width: `${Math.min(100, sessions.length * 8)}%` }}
-            />
+          <div className="relative h-1 overflow-hidden rounded-full bg-secondary/20">
+            <div className="absolute inset-y-0 left-0 rounded-full bg-primary/40" style={{ width: `${Math.min(100, sessions.length * 8)}%` }} />
           </div>
           <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
             <span>active session tracked</span>
@@ -224,10 +216,11 @@ export function Sidebar() {
             <div className="text-[12px] font-medium text-foreground">SEC Assistant</div>
             <div className="text-[10px] text-muted-foreground">production workspace</div>
           </div>
-          <button className="rounded-md p-1.5 text-muted-foreground transition hover:bg-secondary/60 hover:text-foreground">
+          <button className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary/20">
             <Settings className="h-3.5 w-3.5" />
           </button>
         </div>
+        <div className="mt-2 px-1 text-[10px] text-muted-foreground">session {currentSessionLabel}</div>
       </div>
     </aside>
   );

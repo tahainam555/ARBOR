@@ -31,6 +31,7 @@ type ConcurrencyMetrics = {
 export function IntelligencePanel({ open, onClose }: IntelligencePanelProps) {
   const [latency, setLatency] = useState<GlobalLatency>({});
   const [concurrency, setConcurrency] = useState<ConcurrencyMetrics | null>(null);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -57,7 +58,7 @@ export function IntelligencePanel({ open, onClose }: IntelligencePanelProps) {
     };
 
     fetchMetrics();
-    const timer = window.setInterval(fetchMetrics, 4000);
+    const timer = window.setInterval(fetchMetrics, 6000);
     return () => window.clearInterval(timer);
   }, [open]);
 
@@ -70,46 +71,16 @@ export function IntelligencePanel({ open, onClose }: IntelligencePanelProps) {
   }, [latency]);
 
   return (
-    <div
-      aria-hidden={!open}
-      className={[
-        "fixed inset-0 z-50",
-        open ? "pointer-events-auto" : "pointer-events-none",
-      ].join(" ")}
-    >
-      <button
-        aria-label="Close intelligence panel"
-        onClick={onClose}
-        tabIndex={open ? 0 : -1}
-        className={[
-          "absolute inset-0 cursor-default bg-background/40 backdrop-blur-md transition-all duration-500",
-          open ? "opacity-100" : "opacity-0",
-        ].join(" ")}
-      />
+    <div aria-hidden={!open} className={["fixed inset-0 z-50", open ? "pointer-events-auto" : "pointer-events-none"].join(" ") }>
+      <button aria-label="Close intelligence panel" onClick={onClose} className={["absolute inset-0 cursor-default bg-background/30 transition-all duration-300", open ? "opacity-100" : "opacity-0"].join(" ")} />
 
-      <aside
-        role="dialog"
-        aria-label="Intelligence observability panel"
-        className={[
-          "absolute right-0 top-0 flex h-full w-full max-w-[380px] flex-col overflow-hidden",
-          "border-l border-border bg-surface-glass shadow-panel ring-1 ring-white/5",
-          "transition-transform duration-500",
-          open ? "translate-x-0" : "translate-x-full",
-        ].join(" ")}
-      >
-        <div className="hairline-b sticky top-0 z-10 flex h-14 items-center gap-2 bg-surface/50 px-5 backdrop-blur-xl">
-          <Activity className="h-3.5 w-3.5 text-primary" />
-          <span className="font-display text-[13px] font-medium text-foreground">Intelligence</span>
-          <span className="ml-3 flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
-            <span className="h-1.5 w-1.5 rounded-full bg-success animate-blink" />
-            live
-          </span>
-          <button
-            onClick={onClose}
-            aria-label="Close panel"
-            className="ml-auto rounded-md p-1.5 text-muted-foreground transition hover:bg-secondary/60 hover:text-foreground"
-          >
-            <X className="h-4 w-4" strokeWidth={1.75} />
+      <aside role="dialog" aria-label="Intelligence observability panel" className={["absolute right-0 top-0 flex h-full w-full max-w-[320px] flex-col overflow-hidden", "border-l border-transparent bg-surface/80 backdrop-blur-sm", open ? "translate-x-0" : "translate-x-full"].join(" ")}>
+        <div className="hairline-b sticky top-0 z-10 flex h-14 items-center gap-2 px-4 bg-surface/60">
+          <Activity className="h-4 w-4 text-muted-foreground" />
+          <span className="font-medium text-sm text-foreground">Intelligence</span>
+          <button onClick={() => setShowDiagnostics((s) => !s)} className="ml-3 text-xs text-muted-foreground">{showDiagnostics ? 'Hide diagnostics' : 'Diagnostics'}</button>
+          <button onClick={onClose} aria-label="Close panel" className="ml-auto rounded-md p-1 text-muted-foreground hover:bg-secondary/20">
+            <X className="h-4 w-4" />
           </button>
         </div>
 
@@ -192,11 +163,11 @@ function PanelCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-border bg-card/50 p-4 shadow-elevated backdrop-blur-sm">
+    <div className="relative overflow-hidden rounded-2xl bg-card/40 p-3">
       {title && (
-        <div className="mb-3 flex items-center gap-1.5">
+        <div className="mb-2 flex items-center gap-2">
           {icon}
-          <span className="text-[11px] font-medium text-foreground">{title}</span>
+          <span className="text-[12px] font-medium text-foreground">{title}</span>
         </div>
       )}
       {children}
