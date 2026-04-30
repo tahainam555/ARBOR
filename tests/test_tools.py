@@ -37,6 +37,48 @@ async def test_crm_update_watchlist(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_crm_full_workflow_and_execute(tmp_path: Path) -> None:
+    crm = CRMTool(db_path=str(tmp_path / "crm.db"))
+    await crm.initialize()
+
+    created = await crm.execute(action="create_user", user_id="u3", name="Taylor")
+    assert created.success is True
+    assert created.data["user"]["name"] == "Taylor"
+
+    updated = await crm.execute(
+        action="update_field",
+        user_id="u3",
+        field="risk_profile",
+        value="moderate",
+    )
+    assert updated.success is True
+    assert updated.data["updated"] is True
+
+    watchlisted = await crm.execute(action="add_to_watchlist", user_id="u3", ticker="msft")
+    assert watchlisted.success is True
+    assert watchlisted.data["ticker"] == "MSFT"
+
+    logged = await crm.execute(
+        action="log_interaction",
+        user_id="u3",
+        session_id="s-1",
+        summary="Discussed diversification",
+    )
+    assert logged.success is True
+    assert logged.data["logged"] is True
+
+    fetched = await crm.execute(action="get_user", user_id="u3")
+    assert fetched.success is True
+    assert fetched.data["user"]["risk_profile"] == "moderate"
+    assert "MSFT" in fetched.data["user"]["watchlist"]
+
+    history = await crm.execute(action="get_interaction_history", user_id="u3", limit=5)
+    assert history.success is True
+    assert history.data["history"]
+    assert history.data["history"][0]["summary"] == "Discussed diversification"
+
+
+@pytest.mark.asyncio
 async def test_stock_price_invalid_ticker() -> None:
     tool = StockPriceTool()
     result = await tool.execute(ticker="INVALIDXYZ123")

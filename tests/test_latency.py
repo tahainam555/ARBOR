@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
 
+from backend.llm_engine import LLMEngine
 from backend.latency_tracker import LatencyTracker
 
 
@@ -64,3 +66,45 @@ async def test_session_payload_shape(tmp_path: Path) -> None:
     assert len(payload["turns"]) == 1
     assert payload["turns"][0]["stages"]["stt_transcription"] == pytest.approx(300.0, rel=0.001)
     assert payload["averages"]["end_to_end"] == pytest.approx(2000.0, rel=0.001)
+
+
+@pytest.mark.asyncio
+async def test_llm_generation_limits_and_prompt_trimming(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeSettings:
+        n_ctx = 300
+        llm_prompt_reserve_tokens = 4
+        llm_stream_max_tokens = 12
+        llm_tool_max_tokens = 6
+
+    class FakeModel:
+        def __init__(self) -> None:
+            self.last_kwargs = None
+
+        @staticmethod
+        def tokenize(data, add_bos=False):  # type: ignore[no-untyped-def]
+            del add_bos
+            return list(str(data, "utf-8").split())
+
+        @staticmethod
+        def detokenize(tokens):  # type: ignore[no-untyped-def]
+            return " ".join(tokens).encode("utf-8")
+
+        def create_completion(self, **kwargs):  # type: ignore[no-untyped-def]
+            self.last_kwargs = kwargs
+            return {"choices": [{"text": "ok"}]}
+
+    fake_model = FakeModel()
+    engine = object.__new__(LLMEngine)
+    engine.settings = FakeSettings()
+    engine.model = fake_model
+    engine._model_lock = asyncio.Lock()
+
+    prompt_words = [f"w{index}" for index in range(300)]
+    trimmed = engine._trim_prompt_to_context(" ".join(prompt_words))
+    assert trimmed.split() == prompt_words[-296:]
+
+    monkeypatch.setattr(LLMEngine, "_trim_prompt_to_context", lambda self, prompt, reserved_output_tokens=None: prompt)
+    result = await engine.generate_full("short prompt")
+
+    assert result == "ok"
+    assert fake_model.last_kwargs["max_tokens"] == FakeSettings.llm_tool_max_tokens

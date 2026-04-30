@@ -115,7 +115,7 @@ class RAGRetriever:
             filter_year=filter_year,
         )
 
-    async def format_context(self, chunks: list[RetrievedChunk], max_tokens: int = 2000) -> str:
+    async def format_context(self, chunks: list[RetrievedChunk], max_tokens: int = 800) -> str:
         """Format retrieved chunks for LLM prompt with context truncation."""
         context_blocks: list[str] = []
         token_budget = max_tokens

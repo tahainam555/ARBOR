@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 import os
 import re
 import tempfile
@@ -14,6 +15,9 @@ from typing import Any
 import edge_tts
 
 from backend.config import get_settings
+
+
+logger = logging.getLogger("sec-assistant")
 
 try:
     import pyttsx3
@@ -168,6 +172,79 @@ class SpeechSynthesizer:
             await self._stream_local(prepared, websocket, turn_id=turn_id)
 
         return (time.perf_counter() - start) * 1000.0
+
+    async def consume_and_stream(
+        self,
+        sentence_queue: asyncio.Queue,
+        websocket: Any,
+        turn_id: int,
+        latency_tracker: Any,
+        session_id: str,
+    ) -> float:
+        """Consume complete sentences from the queue and stream one audio blob per sentence."""
+        sentence_index = 0
+        total_tts_ms = 0.0
+        tts_start = time.perf_counter()
+
+        while True:
+            sentence = await sentence_queue.get()
+            if sentence is None:
+                break
+
+            clean = self._clean_for_tts(str(sentence))
+            if not clean:
+                continue
+
+            synth_start = time.perf_counter()
+            try:
+                if self.tts_backend == "local":
+                    audio_bytes = await asyncio.to_thread(self._synthesize_local_wav_sync, clean)
+                    mime_type = "audio/wav"
+                    backend = "local"
+                elif self.tts_backend == "edge":
+                    audio_bytes = await self._synthesize_edge_full(clean)
+                    mime_type = "audio/mpeg"
+                    backend = "edge"
+                else:
+                    try:
+                        audio_bytes = await self._synthesize_edge_full(clean)
+                        mime_type = "audio/mpeg"
+                        backend = "edge"
+                    except Exception:
+                        audio_bytes = await asyncio.to_thread(self._synthesize_local_wav_sync, clean)
+                        mime_type = "audio/wav"
+                        backend = "local"
+
+                total_tts_ms += (time.perf_counter() - synth_start) * 1000.0
+                await self._send_audio_chunk(
+                    websocket=websocket,
+                    chunk_bytes=audio_bytes,
+                    sentence_index=sentence_index,
+                    turn_id=turn_id,
+                    mime_type=mime_type,
+                    backend=backend,
+                )
+                sentence_index += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.error("TTS failed for sentence %s: %s", sentence_index, exc)
+
+        await websocket.send_json(
+            {
+                "type": "audio_complete",
+                "turn_id": turn_id,
+                "sentences_synthesized": sentence_index,
+            }
+        )
+
+        wall_tts_ms = (time.perf_counter() - tts_start) * 1000.0
+        await latency_tracker.log(
+            session_id=session_id,
+            turn_id=turn_id,
+            stage="tts_synthesis",
+            duration_ms=total_tts_ms,
+            metadata={"sentences": sentence_index, "wall_ms": wall_tts_ms},
+        )
+        return total_tts_ms
 
     async def _synthesize_edge_full(self, prepared_text: str) -> bytes:
         """Synthesize full response using edge-tts."""

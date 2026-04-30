@@ -25,7 +25,7 @@ class Settings(BaseSettings):
         alias="LLM_MODEL_PATH",
     )
     n_threads: int = Field(default=8, alias="N_THREADS")
-    n_ctx: int = Field(default=4096, alias="N_CTX")
+    n_ctx: int = Field(default=2048, alias="N_CTX")
 
     # Paths
     chroma_path: str = Field(default="./chroma_db", alias="CHROMA_PATH")
@@ -38,13 +38,18 @@ class Settings(BaseSettings):
     tts_backend: str = Field(default="auto", alias="TTS_BACKEND")
 
     # RAG
-    top_k_chunks: int = Field(default=5, alias="TOP_K_CHUNKS")
+    top_k_chunks: int = Field(default=3, alias="TOP_K_CHUNKS")
     chunk_size: int = Field(default=512, alias="CHUNK_SIZE")
     chunk_overlap: int = Field(default=50, alias="CHUNK_OVERLAP")
 
     # Session
     session_timeout_minutes: int = Field(default=30, alias="SESSION_TIMEOUT_MINUTES")
     max_sessions: int = Field(default=50, alias="MAX_SESSIONS")
+
+    # Generation
+    llm_stream_max_tokens: int = Field(default=72, alias="LLM_STREAM_MAX_TOKENS")
+    llm_tool_max_tokens: int = Field(default=24, alias="LLM_TOOL_MAX_TOKENS")
+    llm_prompt_reserve_tokens: int = Field(default=128, alias="LLM_PROMPT_RESERVE_TOKENS")
 
     # Logging
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")

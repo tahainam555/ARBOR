@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import threading
 import time
 from typing import Any
@@ -38,8 +39,10 @@ class LLMEngine:
             cls._instance = cls()
         return cls._instance
 
-    def _trim_prompt_to_context(self, prompt: str, reserved_output_tokens: int = 512) -> str:
+    def _trim_prompt_to_context(self, prompt: str, reserved_output_tokens: int | None = None) -> str:
         """Ensure prompt tokens fit model context by trimming oldest prefix content."""
+        if reserved_output_tokens is None:
+            reserved_output_tokens = self.settings.llm_prompt_reserve_tokens
         max_prompt_tokens = max(256, self.settings.n_ctx - reserved_output_tokens)
         prompt_tokens = self.model.tokenize(prompt.encode("utf-8"), add_bos=False)
         if len(prompt_tokens) <= max_prompt_tokens:
@@ -59,7 +62,7 @@ class LLMEngine:
     ) -> str:
         """Generate streamed text and emit websocket chunks token-by-token."""
         async with self._model_lock:
-            prompt = self._trim_prompt_to_context(prompt, reserved_output_tokens=512)
+            prompt = self._trim_prompt_to_context(prompt)
             queue: asyncio.Queue[str | None] = asyncio.Queue()
             loop = asyncio.get_running_loop()
             full_tokens: list[str] = []
@@ -74,7 +77,7 @@ class LLMEngine:
                         top_p=0.9,
                         top_k=40,
                         repeat_penalty=1.1,
-                        max_tokens=512,
+                        max_tokens=self.settings.llm_stream_max_tokens,
                         stream=True,
                     )
 
@@ -121,6 +124,110 @@ class LLMEngine:
 
             return "".join(full_tokens).strip()
 
+    @staticmethod
+    def _is_sentence_boundary(buffer: str) -> bool:
+        cleaned = buffer.strip()
+        if len(cleaned) < 20:
+            return False
+        if len(cleaned) >= 200:
+            return True
+        if re.search(r"[.!?](?:[\"')\]]|\s|$)", cleaned):
+            return True
+        if cleaned.endswith(":") or cleaned.endswith("..."):
+            return True
+        return False
+
+    async def generate_sentence_streaming(
+        self,
+        prompt: str,
+        sentence_queue: asyncio.Queue[str | None],
+        websocket: Any,
+        session_id: str,
+        turn_id: int,
+        latency_tracker: Any,
+    ) -> str:
+        """Stream tokens to the websocket and hand complete sentences to TTS."""
+        async with self._model_lock:
+            prompt = self._trim_prompt_to_context(prompt)
+            loop = asyncio.get_running_loop()
+            token_queue: asyncio.Queue[str | None] = asyncio.Queue()
+            full_tokens: list[str] = []
+            sentence_buffer = ""
+            start_time = time.perf_counter()
+            first_token_time: float | None = None
+
+            def put_threadsafe(queue: asyncio.Queue[str | None], item: str | None) -> None:
+                future = asyncio.run_coroutine_threadsafe(queue.put(item), loop)
+                future.result()
+
+            def worker() -> None:
+                try:
+                    stream = self.model.create_completion(
+                        prompt=prompt,
+                        temperature=0.1,
+                        top_p=0.9,
+                        top_k=40,
+                        repeat_penalty=1.1,
+                        max_tokens=self.settings.llm_stream_max_tokens,
+                        stream=True,
+                    )
+
+                    for event in stream:
+                        token = event["choices"][0]["text"]
+                        put_threadsafe(token_queue, token)
+                finally:
+                    put_threadsafe(token_queue, None)
+
+            thread = threading.Thread(target=worker, daemon=True)
+            thread.start()
+
+            while True:
+                token = await token_queue.get()
+                if token is None:
+                    break
+
+                full_tokens.append(token)
+                sentence_buffer += token
+
+                if first_token_time is None and token.strip():
+                    first_token_time = (time.perf_counter() - start_time) * 1000.0
+                    await latency_tracker.log(
+                        session_id=session_id,
+                        turn_id=turn_id,
+                        stage="llm_first_token",
+                        duration_ms=first_token_time,
+                    )
+
+                await websocket.send_json(
+                    {
+                        "type": "text_chunk",
+                        "content": token,
+                        "turn_id": turn_id,
+                    }
+                )
+
+                if self._is_sentence_boundary(sentence_buffer):
+                    sentence = sentence_buffer.strip()
+                    if sentence:
+                        await sentence_queue.put(sentence)
+                    sentence_buffer = ""
+
+            if sentence_buffer.strip():
+                await sentence_queue.put(sentence_buffer.strip())
+
+            await sentence_queue.put(None)
+
+            total_generation_ms = (time.perf_counter() - start_time) * 1000.0
+            await latency_tracker.log(
+                session_id=session_id,
+                turn_id=turn_id,
+                stage="llm_total_generation",
+                duration_ms=total_generation_ms,
+                metadata={"tokens": len(full_tokens)},
+            )
+
+            return "".join(full_tokens).strip()
+
     async def generate_full(self, prompt: str) -> str:
         """Generate a non-streaming short response for deterministic tool routing."""
         def run() -> str:
@@ -130,13 +237,13 @@ class LLMEngine:
                 top_p=0.9,
                 top_k=40,
                 repeat_penalty=1.1,
-                max_tokens=100,
+                max_tokens=self.settings.llm_tool_max_tokens,
                 stream=False,
             )
             return result["choices"][0]["text"].strip()
 
         async with self._model_lock:
-            prompt = self._trim_prompt_to_context(prompt, reserved_output_tokens=100)
+            prompt = self._trim_prompt_to_context(prompt, reserved_output_tokens=self.settings.llm_tool_max_tokens + 48)
             return await asyncio.to_thread(run)
 
     async def warmup(self) -> None:

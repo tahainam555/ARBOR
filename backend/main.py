@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import logging
 import time
 from typing import Any
@@ -108,6 +109,18 @@ async def on_startup() -> None:
         crm_tool=crm_tool,
     )
 
+    async def _cleanup_loop() -> None:
+        while True:
+            try:
+                await asyncio.sleep(300)
+                await app.state.manager.session_manager.cleanup_expired()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Session cleanup loop failed")
+
+    app.state.session_cleanup_task = asyncio.create_task(_cleanup_loop())
+
     async def _run_warmup(name: str, coro: Any) -> tuple[str, float, str | None]:
         warmup_start = time.perf_counter()
         try:
@@ -131,6 +144,15 @@ async def on_startup() -> None:
     logger.info("System ready")
     logger.info("Startup component timings (ms): %s", component_times)
     logger.info("Total startup time (ms): %.2f", total_ms)
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    task = getattr(app.state, "session_cleanup_task", None)
+    if task is not None:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 @app.get("/", include_in_schema=False)
@@ -167,7 +189,7 @@ async def health() -> dict[str, Any]:
 async def list_sessions() -> list[dict[str, Any]]:
     """List active conversation sessions."""
     manager: ConversationManager = app.state.manager
-    return manager.get_active_sessions()
+    return await manager.get_active_sessions()
 
 
 @app.get("/api/latency/{session_id}")
@@ -222,10 +244,12 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
 
                 if msg_type == "text_input":
                     message = str(payload.get("message", "")).strip()
+                    user_id = payload.get("user_id")
                     breakdown = await manager.handle_text_turn(
                         session_id=session_id,
                         message=message,
                         websocket=websocket,
+                        user_id=str(user_id).strip() if user_id else None,
                         speak_response=False,
                     )
                     await websocket.send_json(
@@ -262,10 +286,12 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
                         continue
 
                     audio_format = str(payload.get("format", "")).strip().lower() or None
+                    user_id = payload.get("user_id")
                     breakdown = await manager.handle_audio_turn(
                         session_id=session_id,
                         audio_bytes=audio_bytes,
                         websocket=websocket,
+                        user_id=str(user_id).strip() if user_id else None,
                         audio_format=audio_format,
                     )
                     await websocket.send_json(

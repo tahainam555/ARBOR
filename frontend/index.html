@@ -89,6 +89,13 @@
       min-height: 0;
     }
 
+    .sidebar-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-height: 0;
+    }
+
     .panel {
       background: linear-gradient(180deg, rgba(21, 29, 52, 0.95), rgba(12, 18, 32, 0.95));
       border: 1px solid var(--line);
@@ -110,11 +117,75 @@
     }
 
     .latency-content,
+    .sessions-content,
     .market-content {
       padding: 12px;
       overflow: auto;
       font-family: 'IBM Plex Mono', monospace;
       font-size: 12px;
+    }
+
+    .sessions-toolbar {
+      display: flex;
+      gap: 8px;
+      padding: 12px;
+      border-bottom: 1px solid rgba(0, 212, 255, 0.12);
+      flex-wrap: wrap;
+    }
+
+    .session-card {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid rgba(151, 166, 192, 0.16);
+      border-radius: 12px;
+      background: rgba(12, 18, 32, 0.65);
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+      margin-bottom: 10px;
+    }
+
+    .session-card.active {
+      border-color: rgba(0, 212, 255, 0.52);
+      box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.12) inset;
+      background: rgba(0, 212, 255, 0.08);
+    }
+
+    .session-card-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .session-card-meta {
+      color: var(--muted);
+      line-height: 1.35;
+    }
+
+    .session-empty {
+      padding: 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .session-badge {
+      font-size: 10px;
+      padding: 3px 6px;
+      border-radius: 999px;
+      border: 1px solid rgba(151, 166, 192, 0.18);
+      color: var(--muted);
+    }
+
+    .session-badge.active {
+      color: var(--glow);
+      border-color: rgba(0, 212, 255, 0.35);
+      background: rgba(0, 212, 255, 0.1);
     }
 
     .latency-row { margin-bottom: 10px; }
@@ -291,9 +362,20 @@
     </header>
 
     <main class="main">
-      <section class="panel">
-        <div class="panel-header">Latency Dashboard</div>
-        <div id="latencyContent" class="latency-content"></div>
+      <section class="sidebar-stack">
+        <section class="panel">
+          <div class="panel-header">Sessions</div>
+          <div class="sessions-toolbar">
+            <button id="newSessionBtn" class="btn" type="button">New Session</button>
+            <button id="refreshSessionsBtn" class="btn" type="button">Refresh</button>
+          </div>
+          <div id="sessionsContent" class="sessions-content"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">Latency Dashboard</div>
+          <div id="latencyContent" class="latency-content"></div>
+        </section>
       </section>
 
       <section class="panel chat-body">
@@ -316,10 +398,13 @@
   </div>
 
   <script>
+    const sessionsContent = document.getElementById('sessionsContent');
     const messagesEl = document.getElementById('messages');
     const textInput = document.getElementById('textInput');
     const sendBtn = document.getElementById('sendBtn');
     const micBtn = document.getElementById('micBtn');
+    const newSessionBtn = document.getElementById('newSessionBtn');
+    const refreshSessionsBtn = document.getElementById('refreshSessionsBtn');
     const waveEl = document.getElementById('wave');
     const latencyEl = document.getElementById('latencyContent');
     const marketEl = document.getElementById('marketContent');
@@ -327,22 +412,108 @@
     const statusText = document.getElementById('statusText');
 
     const SESSION_KEY = 'sec_assistant_session_id';
+    const SESSION_MESSAGES_KEY = 'sec_assistant_session_messages';
+    const sessionsCache = new Map();
+    const sessionMessages = new Map();
+
+    function newSessionId() {
+      return crypto.randomUUID();
+    }
+
     let sessionId = localStorage.getItem(SESSION_KEY);
     if (!sessionId) {
-      sessionId = crypto.randomUUID();
+      sessionId = newSessionId();
       localStorage.setItem(SESSION_KEY, sessionId);
     }
 
     let ws = null;
     let reconnectDelay = 500;
     let currentAssistantBubble = null;
+    let shouldReconnect = true;
     let mediaRecorder = null;
     let recordingMimeType = 'audio/webm';
     let recordedChunks = [];
     let recordingStart = 0;
-    const audioQueue = [];
-    let isPlayingAudio = false;
     const latencyHistory = [];
+
+    class AudioQueue {
+      constructor() {
+        this.queue = [];
+        this.isPlaying = false;
+        this.currentAudio = null;
+        this.currentUrl = null;
+      }
+
+      enqueue(base64Audio, mimeType = 'audio/mpeg') {
+        this.queue.push({ base64Audio, mimeType });
+        this.playNext();
+      }
+
+      async playNext() {
+        if (this.isPlaying || this.queue.length === 0) {
+          return;
+        }
+
+        this.isPlaying = true;
+        const item = this.queue.shift();
+
+        try {
+          const binary = atob(item.base64Audio);
+          const bytes = new Uint8Array(binary.length);
+          for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+          }
+
+          const blob = new Blob([bytes], { type: item.mimeType });
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          this.currentAudio = audio;
+          this.currentUrl = url;
+
+          audio.onended = () => {
+            URL.revokeObjectURL(url);
+            this.isPlaying = false;
+            this.currentAudio = null;
+            this.currentUrl = null;
+            this.playNext();
+          };
+          audio.onerror = () => {
+            URL.revokeObjectURL(url);
+            this.isPlaying = false;
+            this.currentAudio = null;
+            this.currentUrl = null;
+            this.playNext();
+          };
+
+          await audio.play();
+        } catch (error) {
+          console.error('Audio playback error:', error);
+          this.isPlaying = false;
+          this.currentAudio = null;
+          this.currentUrl = null;
+          this.playNext();
+        }
+      }
+
+      clear() {
+        this.queue = [];
+        this.isPlaying = false;
+        if (this.currentAudio) {
+          this.currentAudio.pause();
+          this.currentAudio = null;
+        }
+        if (this.currentUrl) {
+          URL.revokeObjectURL(this.currentUrl);
+          this.currentUrl = null;
+        }
+      }
+
+      stop() {
+        this.clear();
+      }
+    }
+
+    const audioQueuePlayer = new AudioQueue();
 
     function pickRecorderMimeType() {
       const preferred = [
@@ -392,39 +563,238 @@
       return `${protocol}://${backendHost()}/ws/${sessionId}`;
     }
 
+    function apiUrl(path) {
+      return `${location.protocol === 'file:' ? 'http' : location.protocol.slice(0, -1)}://${backendHost()}${path}`;
+    }
+
     function setConnectionState(online) {
       statusDot.classList.toggle('online', online);
       statusText.textContent = online ? 'online' : 'offline';
     }
 
     function connectSocket() {
-      ws = new WebSocket(wsUrl());
+      const socket = new WebSocket(wsUrl());
+      ws = socket;
 
-      ws.onopen = () => {
+      socket.onopen = () => {
         setConnectionState(true);
         reconnectDelay = 500;
       };
 
-      ws.onclose = () => {
+      socket.onclose = () => {
         setConnectionState(false);
+        if (!shouldReconnect || ws !== socket) {
+          return;
+        }
         setTimeout(connectSocket, reconnectDelay);
         reconnectDelay = Math.min(reconnectDelay * 2, 6000);
       };
 
-      ws.onerror = () => ws.close();
+      socket.onerror = () => {
+        if (ws === socket) {
+          socket.close();
+        }
+      };
 
-      ws.onmessage = (event) => {
+      socket.onmessage = (event) => {
         const msg = JSON.parse(event.data);
         handleServerMessage(msg);
       };
     }
 
+    function disconnectSocket() {
+      shouldReconnect = false;
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+    }
+
+    function persistSessionMessages() {
+      const payload = Object.fromEntries(sessionMessages.entries());
+      localStorage.setItem(SESSION_MESSAGES_KEY, JSON.stringify(payload));
+    }
+
+    function hydrateSessionMessages() {
+      try {
+        const raw = localStorage.getItem(SESSION_MESSAGES_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        Object.entries(parsed).forEach(([key, value]) => {
+          if (Array.isArray(value)) {
+            sessionMessages.set(key, value);
+          }
+        });
+      } catch (error) {
+        console.warn('Could not restore session transcripts:', error);
+      }
+    }
+
+    function ensureSessionStore(id) {
+      if (!sessionMessages.has(id)) {
+        sessionMessages.set(id, []);
+      }
+      return sessionMessages.get(id);
+    }
+
+    function getSessionLabel(session) {
+      if (session.user_id) return session.user_id;
+      return `Session ${session.session_id.slice(0, 8)}`;
+    }
+
+    function normalizeSession(session) {
+      return {
+        session_id: session.session_id,
+        user_id: session.user_id || null,
+        turn_count: Number(session.turn_count || 0),
+        created_at: session.created_at || null,
+        last_active: session.last_active || null,
+        source: session.source || 'backend',
+        local: Boolean(session.local),
+      };
+    }
+
+    function mergeSessionList(remoteSessions) {
+      const merged = new Map();
+
+      remoteSessions.map(normalizeSession).forEach((session) => {
+        merged.set(session.session_id, session);
+      });
+
+      sessionsCache.forEach((session, id) => {
+        if (!merged.has(id)) {
+          merged.set(id, session);
+        }
+      });
+
+      if (!merged.has(sessionId)) {
+        merged.set(sessionId, {
+          session_id: sessionId,
+          user_id: null,
+          turn_count: 0,
+          created_at: null,
+          last_active: null,
+          source: 'local',
+          local: true,
+        });
+      }
+
+      sessionsCache.clear();
+      Array.from(merged.entries())
+        .sort((left, right) => {
+          const leftTime = new Date(left[1].last_active || left[1].created_at || 0).getTime();
+          const rightTime = new Date(right[1].last_active || right[1].created_at || 0).getTime();
+          return rightTime - leftTime;
+        })
+        .forEach(([id, session]) => sessionsCache.set(id, session));
+    }
+
+    function renderSessionMessages(id) {
+      messagesEl.innerHTML = '';
+      const entries = ensureSessionStore(id);
+      entries.forEach((entry) => {
+        const bubble = addBubble(entry.role, entry.text, false);
+        if (entry.role === 'assistant' && entry.streaming) {
+          currentAssistantBubble = bubble;
+        }
+      });
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function renderSessions() {
+      const list = Array.from(sessionsCache.values());
+      if (!list.length) {
+        sessionsContent.innerHTML = '<div class="session-empty">No active sessions yet. Create one to start a new conversation.</div>';
+        return;
+      }
+
+      sessionsContent.innerHTML = '';
+      list.forEach((session) => {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = `session-card${session.session_id === sessionId ? ' active' : ''}`;
+        card.innerHTML = `
+          <div class="session-card-title">
+            <span>${getSessionLabel(session)}</span>
+            <span class="session-badge${session.session_id === sessionId ? ' active' : ''}">${session.session_id === sessionId ? 'active' : session.source}</span>
+          </div>
+          <div class="session-card-meta">${session.session_id}</div>
+          <div class="session-card-meta">Turns: ${session.turn_count || 0}${session.last_active ? ` | Last: ${new Date(session.last_active).toLocaleString()}` : ''}</div>
+        `;
+        card.addEventListener('click', () => activateSession(session.session_id));
+        sessionsContent.appendChild(card);
+      });
+    }
+
+    async function syncSessions() {
+      try {
+        const response = await fetch(apiUrl('/api/sessions'));
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const sessions = await response.json();
+        mergeSessionList(sessions);
+        renderSessions();
+      } catch (error) {
+        console.warn('Session list sync failed:', error);
+        renderSessions();
+      }
+    }
+
+    function activateSession(nextSessionId, { createLocal = false } = {}) {
+      if (!nextSessionId || nextSessionId === sessionId) {
+        renderSessions();
+        renderSessionMessages(sessionId);
+        return;
+      }
+
+      disconnectSocket();
+      audioQueuePlayer.stop();
+      currentAssistantBubble = null;
+
+      sessionId = nextSessionId;
+      localStorage.setItem(SESSION_KEY, sessionId);
+      if (createLocal) {
+        sessionsCache.set(sessionId, {
+          session_id: sessionId,
+          user_id: null,
+          turn_count: 0,
+          created_at: new Date().toISOString(),
+          last_active: new Date().toISOString(),
+          source: 'local',
+          local: true,
+        });
+      }
+
+      ensureSessionStore(sessionId);
+      renderSessions();
+      renderSessionMessages(sessionId);
+      shouldReconnect = true;
+      connectSocket();
+    }
+
+    function createNewSession() {
+      const id = newSessionId();
+      activateSession(id, { createLocal: true });
+    }
+
     function addBubble(role, text) {
+      return addBubble(role, text, true);
+    }
+
+    function addBubble(role, text, persist = true) {
       const div = document.createElement('div');
       div.className = `bubble ${role}`;
       div.innerHTML = formatMessage(text);
       messagesEl.appendChild(div);
       messagesEl.scrollTop = messagesEl.scrollHeight;
+
+      if (persist) {
+        const entries = ensureSessionStore(sessionId);
+        entries.push({ role, text, streaming: false });
+        persistSessionMessages();
+      }
+
       return div;
     }
 
@@ -450,37 +820,17 @@
       addBubble('user', message);
       showToolHint(message);
       currentAssistantBubble = addBubble('assistant', '');
+      const entries = ensureSessionStore(sessionId);
+      if (entries.length > 0) {
+        entries[entries.length - 1].streaming = true;
+        persistSessionMessages();
+      }
       ws.send(JSON.stringify({ type: 'text_input', message }));
       textInput.value = '';
     }
 
     function enqueueAudio(base64Audio, mimeType = 'audio/mpeg') {
-      const binary = atob(base64Audio);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const blob = new Blob([bytes], { type: mimeType });
-      audioQueue.push(URL.createObjectURL(blob));
-      playNextAudio();
-    }
-
-    function playNextAudio() {
-      if (isPlayingAudio || audioQueue.length === 0) return;
-      isPlayingAudio = true;
-      const src = audioQueue.shift();
-      const audio = new Audio(src);
-      audio.onended = () => {
-        URL.revokeObjectURL(src);
-        isPlayingAudio = false;
-        playNextAudio();
-      };
-      audio.onerror = () => {
-        URL.revokeObjectURL(src);
-        isPlayingAudio = false;
-        playNextAudio();
-      };
-      audio.play().catch(() => {
-        isPlayingAudio = false;
-      });
+      audioQueuePlayer.enqueue(base64Audio, mimeType);
     }
 
     function colorForLatency(ms) {
@@ -524,6 +874,13 @@
       if (msg.type === 'text_chunk') {
         if (!currentAssistantBubble) currentAssistantBubble = addBubble('assistant', '');
         currentAssistantBubble.innerHTML = formatMessage((currentAssistantBubble.textContent || '') + msg.content);
+        const entries = ensureSessionStore(sessionId);
+        const last = entries[entries.length - 1];
+        if (last && last.role === 'assistant') {
+          last.text = (last.text || '') + msg.content;
+          last.streaming = true;
+          persistSessionMessages();
+        }
         messagesEl.scrollTop = messagesEl.scrollHeight;
         return;
       }
@@ -533,14 +890,25 @@
         return;
       }
 
+      if (msg.type === 'audio_complete') {
+        return;
+      }
+
       if (msg.type === 'transcription') {
-        addBubble('assistant', `Transcription: ${msg.text} (${Number(msg.duration_ms || 0).toFixed(1)} ms)`);
+        addBubble('user', msg.text);
         return;
       }
 
       if (msg.type === 'turn_complete') {
+        const entries = ensureSessionStore(sessionId);
+        const last = entries[entries.length - 1];
+        if (last && last.role === 'assistant') {
+          last.streaming = false;
+          persistSessionMessages();
+        }
         renderLatency(msg.latency_breakdown || {});
         currentAssistantBubble = null;
+        syncSessions();
         return;
       }
 
@@ -586,6 +954,11 @@
 
             if (ws && ws.readyState === WebSocket.OPEN) {
               currentAssistantBubble = addBubble('assistant', '');
+              const entries = ensureSessionStore(sessionId);
+              if (entries.length > 0) {
+                entries[entries.length - 1].streaming = true;
+                persistSessionMessages();
+              }
               ws.send(JSON.stringify({
                 type: 'audio_input',
                 session_id: sessionId,
@@ -612,8 +985,6 @@
       mediaRecorder.stop();
       waveEl.classList.remove('active');
       micBtn.classList.remove('recording');
-      const seconds = ((Date.now() - recordingStart) / 1000).toFixed(1);
-      addBubble('user', `Voice message (${seconds}s)`);
     }
 
     sendBtn.addEventListener('click', sendText);
@@ -621,14 +992,23 @@
       if (e.key === 'Enter') sendText();
     });
 
+    newSessionBtn.addEventListener('click', createNewSession);
+    refreshSessionsBtn.addEventListener('click', syncSessions);
+
     micBtn.addEventListener('mousedown', startRecording);
     micBtn.addEventListener('mouseup', stopRecording);
     micBtn.addEventListener('mouseleave', stopRecording);
     micBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); }, { passive: false });
     micBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopRecording(); }, { passive: false });
 
+    hydrateSessionMessages();
     renderMarketSidebar();
+    ensureSessionStore(sessionId);
+    renderSessionMessages(sessionId);
+    renderSessions();
+    shouldReconnect = true;
     connectSocket();
+    syncSessions();
   </script>
 </body>
 </html>
