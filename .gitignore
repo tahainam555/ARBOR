@@ -12,7 +12,11 @@ venv/
 
 # Runtime data
 data/*.db
+data/*.log
 chroma_db/
+
+# Temporary test files
+tmp_*.py
 
 # Model binaries
 models/*.gguf
@@ -20,3 +24,7 @@ models/*.gguf
 # OS
 .DS_Store
 Thumbs.db
+node_modules
+frontend/node_modules/
+frontend/dist/
+frontend/.wrangler/

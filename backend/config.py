@@ -20,12 +20,20 @@ class Settings(BaseSettings):
     )
 
     # LLM
+    llm_backend: str = Field(default="ollama", alias="LLM_BACKEND")
     llm_model_path: str = Field(
         default="./models/tiny-llama-miniguanaco-1.5t.q2_k.gguf",
         alias="LLM_MODEL_PATH",
     )
+<<<<<<< HEAD
     n_threads: int = Field(default=4, alias="N_THREADS")
     n_ctx: int = Field(default=1024, alias="N_CTX")
+=======
+    ollama_base_url: str = Field(default="http://127.0.0.1:11434", alias="OLLAMA_BASE_URL")
+    ollama_model: str = Field(default="llama3.2:3b", alias="OLLAMA_MODEL")
+    n_threads: int = Field(default=8, alias="N_THREADS")
+    n_ctx: int = Field(default=4096, alias="N_CTX")
+>>>>>>> ac7f852436c596021d363a069857b81fad70556e
 
     # Paths
     chroma_path: str = Field(default="./chroma_db", alias="CHROMA_PATH")
@@ -45,6 +53,8 @@ class Settings(BaseSettings):
     # Session
     session_timeout_minutes: int = Field(default=30, alias="SESSION_TIMEOUT_MINUTES")
     max_sessions: int = Field(default=50, alias="MAX_SESSIONS")
+    max_concurrent_turns: int = Field(default=4, alias="MAX_CONCURRENT_TURNS")
+    turn_queue_timeout_seconds: float = Field(default=5.0, alias="TURN_QUEUE_TIMEOUT_SECONDS")
 
     # Generation
     llm_stream_max_tokens: int = Field(default=128, alias="LLM_STREAM_MAX_TOKENS")
@@ -65,6 +75,11 @@ class Settings(BaseSettings):
         return (self.project_root / self.llm_model_path).resolve()
 
     @property
+    def llm_backend_name(self) -> str:
+        """Return normalized LLM backend name."""
+        return self.llm_backend.strip().lower()
+
+    @property
     def chroma_dir(self) -> Path:
         """Return absolute path to persistent ChromaDB directory."""
         return (self.project_root / self.chroma_path).resolve()
@@ -83,6 +98,11 @@ class Settings(BaseSettings):
     def latency_db_path(self) -> Path:
         """Return absolute path to latency SQLite database."""
         return self.data_dir / "latency.db"
+
+    @property
+    def conversation_db_path(self) -> Path:
+        """Return absolute path to session/chat SQLite database."""
+        return self.data_dir / "conversation.db"
 
     @property
     def crm_db_path(self) -> Path:

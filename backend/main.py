@@ -7,18 +7,23 @@ import base64
 import contextlib
 import logging
 import time
+import uuid
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 from backend.config import get_settings
+from backend.chat_store import ChatStore
+from backend.concurrency_limiter import TurnConcurrencyLimiter
 from backend.conversation_manager import ConversationManager
+from backend.domain_classifier import DomainClassifier
 from backend.latency_tracker import LatencyTracker
 from backend.llm_engine import LLMEngine
 from backend.rag.indexer import SECIndexer
 from backend.rag.retriever import RAGRetriever
+from backend.session_store import SessionStore
 from backend.tool_orchestrator import ToolOrchestrator
 from backend.tools.calculator_tool import CalculatorTool
 from backend.tools.crm_tool import CRMTool
@@ -65,6 +70,19 @@ async def on_startup() -> None:
     component_times["crm_tool"] = (time.perf_counter() - t0) * 1000.0
 
     t0 = time.perf_counter()
+    session_store = SessionStore()
+    await session_store.initialize()
+    component_times["session_store"] = (time.perf_counter() - t0) * 1000.0
+
+    t0 = time.perf_counter()
+    chat_store = ChatStore()
+    await chat_store.initialize()
+    component_times["chat_store"] = (time.perf_counter() - t0) * 1000.0
+
+    domain_classifier = DomainClassifier()
+    component_times["domain_classifier"] = 0.0
+
+    t0 = time.perf_counter()
     retriever = RAGRetriever()
     component_times["retriever"] = (time.perf_counter() - t0) * 1000.0
 
@@ -94,6 +112,8 @@ async def on_startup() -> None:
 
     app.state.latency_tracker = latency_tracker
     app.state.crm_tool = crm_tool
+    app.state.session_store = session_store
+    app.state.chat_store = chat_store
     app.state.retriever = retriever
     app.state.transcriber = transcriber
     app.state.synthesizer = synthesizer
@@ -108,6 +128,13 @@ async def on_startup() -> None:
         synthesizer=synthesizer,
         latency_tracker=latency_tracker,
         crm_tool=crm_tool,
+        session_store=session_store,
+        chat_store=chat_store,
+        domain_classifier=domain_classifier,
+    )
+    app.state.turn_limiter = TurnConcurrencyLimiter(
+        max_concurrent=settings.max_concurrent_turns,
+        queue_timeout_seconds=settings.turn_queue_timeout_seconds,
     )
 
     async def _cleanup_loop() -> None:
@@ -130,16 +157,21 @@ async def on_startup() -> None:
         except Exception as exc:  # noqa: BLE001
             return name, (time.perf_counter() - warmup_start) * 1000.0, str(exc)
 
-    warmup_results = await asyncio.gather(
-        _run_warmup("retriever", retriever.warmup()),
-        _run_warmup("transcriber", transcriber.warmup()),
-        _run_warmup("llm_engine", llm_engine.warmup()),
-    )
+    async def _warmup_background() -> None:
+        warmup_results = await asyncio.gather(
+            _run_warmup("retriever", retriever.warmup()),
+            _run_warmup("transcriber", transcriber.warmup()),
+            _run_warmup("llm_engine", llm_engine.warmup()),
+        )
 
-    for name, duration_ms, error in warmup_results:
-        component_times[f"warmup_{name}"] = duration_ms
-        if error:
-            logger.warning("Warmup failed for %s: %s", name, error)
+        for name, duration_ms, error in warmup_results:
+            component_times[f"warmup_{name}"] = duration_ms
+            if error:
+                logger.warning("Warmup failed for %s: %s", name, error)
+
+        logger.info("Warmups complete")
+
+    app.state.warmup_task = asyncio.create_task(_warmup_background())
 
     total_ms = (time.perf_counter() - start) * 1000.0
     logger.info("System ready")
@@ -189,8 +221,61 @@ async def health() -> dict[str, Any]:
 @app.get("/api/sessions")
 async def list_sessions() -> list[dict[str, Any]]:
     """List active conversation sessions."""
+    session_store: SessionStore = app.state.session_store
+    return await session_store.list_sessions()
+
+
+@app.post("/api/sessions")
+async def create_session(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Create or refresh one session record."""
+    session_store: SessionStore = app.state.session_store
+    payload = payload or {}
+    session_id = str(payload.get("session_id") or uuid.uuid4())
+    user_id = payload.get("user_id")
+    title = payload.get("title")
+    session = await session_store.create_session(session_id=session_id, user_id=user_id, title=title)
+    await session_store.touch_session(session_id=session_id, user_id=user_id, title=title, turn_count=session["turn_count"])
+    return await session_store.get_session(session_id) or session
+
+
+@app.get("/api/sessions/{session_id}")
+async def get_session(session_id: str) -> dict[str, Any]:
+    """Return one stored session record."""
+    session_store: SessionStore = app.state.session_store
+    session = await session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+@app.get("/api/sessions/{session_id}/history")
+async def get_session_history(session_id: str) -> dict[str, Any]:
+    """Return one session with its persisted message history."""
+    session_store: SessionStore = app.state.session_store
+    chat_store: ChatStore = app.state.chat_store
+    session = await session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    history = await chat_store.get_history(session_id, limit=100)
+    return {"session": session, "messages": history}
+
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str) -> dict[str, Any]:
+    """Delete a session and its chat history."""
+    session_store: SessionStore = app.state.session_store
+    chat_store: ChatStore = app.state.chat_store
+    await chat_store.delete_session_messages(session_id)
+    await session_store.delete_session(session_id)
+    return {"status": "deleted", "session_id": session_id}
+
+
+@app.post("/api/sessions/{session_id}/summary/refresh")
+async def refresh_session_summary(session_id: str) -> dict[str, Any]:
+    """Force-refresh and return the latest summary for one session."""
     manager: ConversationManager = app.state.manager
-    return await manager.get_active_sessions()
+    return manager.get_active_sessions()
 
 
 @app.get("/api/latency/{session_id}")
@@ -347,11 +432,26 @@ async def trigger_indexing() -> dict[str, Any]:
     }
 
 
+@app.get("/api/metrics/concurrency")
+async def get_concurrency_metrics() -> dict[str, Any]:
+    """Return current concurrency limiter state and metrics."""
+    limiter: TurnConcurrencyLimiter = app.state.turn_limiter
+    metrics = limiter.get_metrics()
+    return {
+        "max_concurrent_turns": metrics.max_concurrent_turns,
+        "current_active_turns": metrics.current_active_turns,
+        "queued_sessions": metrics.queued_sessions,
+        "total_turns_processed": metrics.total_turns_processed,
+        "total_wait_ms": metrics.total_wait_ms,
+    }
+
+
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
     """Main real-time conversation websocket for text and voice messages."""
     await websocket.accept()
     manager: ConversationManager = app.state.manager
+    limiter: TurnConcurrencyLimiter = app.state.turn_limiter
 
     try:
         while True:
@@ -360,13 +460,11 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
                 msg_type = payload.get("type")
 
                 if msg_type == "text_input":
-                    message = str(payload.get("message") or payload.get("content") or "").strip()
-                    user_id = payload.get("user_id")
+                    message = str(payload.get("message", "")).strip()
                     breakdown = await manager.handle_text_turn(
                         session_id=session_id,
                         message=message,
                         websocket=websocket,
-                        user_id=str(user_id).strip() if user_id else None,
                         speak_response=False,
                     )
                     await websocket.send_json(
@@ -403,12 +501,10 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
                         continue
 
                     audio_format = str(payload.get("format", "")).strip().lower() or None
-                    user_id = payload.get("user_id")
                     breakdown = await manager.handle_audio_turn(
                         session_id=session_id,
                         audio_bytes=audio_bytes,
                         websocket=websocket,
-                        user_id=str(user_id).strip() if user_id else None,
                         audio_format=audio_format,
                     )
                     await websocket.send_json(
