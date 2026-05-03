@@ -1,0 +1,106 @@
+{
+  "tests": [
+    {
+      "input": "Hi my name is Ahmed",
+      "expected": {
+        "user_name": "Ahmed"
+      }
+    },
+    {
+      "input": "Call me Sarah",
+      "expected": {
+        "user_name": "Sarah"
+      }
+    },
+    {
+      "input": "I am a conservative investor",
+      "expected": {
+        "risk_profile": "conservative"
+      }
+    },
+    {
+      "input": "I prefer aggressive high risk investments",
+      "expected": {
+        "risk_profile": "aggressive"
+      }
+    },
+    {
+      "input": "I have moderate risk tolerance",
+      "expected": {
+        "risk_profile": "moderate"
+      }
+    },
+    {
+      "input": "I am watching Tesla and Apple",
+      "expected": {
+        "watchlist": [
+          "TSLA",
+          "AAPL"
+        ]
+      }
+    },
+    {
+      "input": "Keep an eye on NVDA for me",
+      "expected": {
+        "watchlist": [
+          "NVDA"
+        ]
+      }
+    },
+    {
+      "input": "I want to retire in 15 years",
+      "expected": {
+        "goals": [
+          "retire in 15 years"
+        ]
+      }
+    },
+    {
+      "input": "Saving for my kids college",
+      "expected": {
+        "goals": [
+          "college savings"
+        ]
+      }
+    },
+    {
+      "input": "I own 100 shares of Apple",
+      "expected": {
+        "mentioned_holdings": [
+          {
+            "ticker": "AAPL"
+          }
+        ]
+      }
+    },
+    {
+      "input": "I focus on dividend income",
+      "expected": {
+        "interests": [
+          "dividend income"
+        ]
+      }
+    },
+    {
+      "input": "I love growth stocks in the tech sector",
+      "expected": {
+        "interests": [
+          "growth",
+          "tech sector"
+        ]
+      }
+    },
+    {
+      "input": "What was Apple revenue last year?",
+      "expected": {}
+    },
+    {
+      "input": "Show me Tesla stock price",
+      "expected": {}
+    },
+    {
+      "input": "Hello how are you today?",
+      "expected": {}
+    }
+  ]
+}

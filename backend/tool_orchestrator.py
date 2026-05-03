@@ -17,6 +17,7 @@ from backend.tools.base_tool import BaseTool, ToolResult
 class ToolExecutionResult:
     """Result bundle from detect-and-execute orchestration."""
 
+    detections: list[dict[str, Any]] = field(default_factory=list)
     tools_called: list[str] = field(default_factory=list)
     results: dict[str, dict[str, Any]] = field(default_factory=dict)
     formatted_context: str = ""
@@ -102,9 +103,57 @@ class ToolOrchestrator:
             query = self._extract_ticker(message) or message
             detected.append({"tool": "news_tool", "params": {"query": query, "max_results": 5}})
 
-        crm_patterns = ["remember me", "my profile", "i'm back", "update my", "i prefer"]
-        if any(pattern in lower for pattern in crm_patterns):
-            detected.append(
+        crm_actions: list[dict[str, Any]] = []
+
+        name_match = re.search(r"\b(?:my name is|call me)\s+([^.,!?;]+)", message, flags=re.IGNORECASE)
+        if name_match:
+            candidate = re.split(r"\b(?:and|but|because|so|with|for|to|if)\b", name_match.group(1), maxsplit=1, flags=re.IGNORECASE)[0].strip()
+            crm_actions.append(
+                {
+                    "tool": "crm_tool",
+                    "params": {
+                        "action": "update_field",
+                        "user_id": "default_user",
+                        "field": "name",
+                        "value": candidate,
+                    },
+                }
+            )
+
+        risk_match = re.search(
+            r"\b(?:i am|i'm|i prefer|my risk tolerance is)\s+(?:a\s+|an\s+)?(conservative|moderate|aggressive)\b",
+            message,
+            flags=re.IGNORECASE,
+        )
+        if risk_match:
+            crm_actions.append(
+                {
+                    "tool": "crm_tool",
+                    "params": {
+                        "action": "update_field",
+                        "user_id": "default_user",
+                        "field": "risk_profile",
+                        "value": risk_match.group(1).lower(),
+                    },
+                }
+            )
+
+        if "watchlist" in lower or "watching" in lower or "keep an eye on" in lower:
+            ticker = self._extract_ticker(message)
+            if ticker:
+                crm_actions.append(
+                    {
+                        "tool": "crm_tool",
+                        "params": {
+                            "action": "add_to_watchlist",
+                            "user_id": "default_user",
+                            "ticker": ticker,
+                        },
+                    }
+                )
+
+        if any(pattern in lower for pattern in ("remember me", "my profile", "i'm back", "update my")):
+            crm_actions.append(
                 {
                     "tool": "crm_tool",
                     "params": {
@@ -113,6 +162,8 @@ class ToolOrchestrator:
                     },
                 }
             )
+
+        detected.extend(crm_actions)
 
         return detected
 
@@ -269,6 +320,7 @@ class ToolOrchestrator:
         serializable_results = {tool: result.model_dump() for tool, result in results.items()}
 
         return ToolExecutionResult(
+            detections=detections,
             tools_called=tools_called,
             results=serializable_results,
             formatted_context=formatted,

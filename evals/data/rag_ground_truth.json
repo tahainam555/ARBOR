@@ -1,0 +1,576 @@
+{
+  "version": "1.0",
+  "description": "30 queries with annotated relevant chunk IDs from ChromaDB",
+  "queries": [
+    {
+      "id": "rag_001",
+      "query": "What was Apple's total revenue in fiscal year 2023?",
+      "expected_answer": "Apple's total net sales were $383.3 billion in fiscal year 2023",
+      "relevant_chunk_ids": [
+        "AAPL_DEF14A_latest_chunk_40",
+        "AAPL_10Q_latest_chunk_61"
+      ],
+      "relevant_tickers": [
+        "AAPL"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "id": "rag_002",
+      "query": "What was Apple's total revenue in fiscal year 2022?",
+      "expected_answer": "Apple's total net sales were $394.3 billion in fiscal year 2022",
+      "relevant_chunk_ids": [
+        "AAPL_DEF14A_latest_chunk_40",
+        "AAPL_10Q_latest_chunk_61"
+      ],
+      "relevant_tickers": [
+        "AAPL"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2022"
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "id": "rag_003",
+      "query": "What was Microsoft's net income in 2022?",
+      "expected_answer": "Microsoft reported net income of about $72.7 billion in fiscal year 2022",
+      "relevant_chunk_ids": [
+        "MSFT_DEF14A_latest_chunk_699",
+        "MSFT_DEF14A_latest_chunk_359"
+      ],
+      "relevant_tickers": [
+        "MSFT"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2022"
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "id": "rag_004",
+      "query": "How much did Tesla spend on research and development in 2023?",
+      "expected_answer": "Tesla's R&D expenses were approximately $3.97 billion in 2023",
+      "relevant_chunk_ids": [
+        "TSLA_DEF14A_latest_chunk_1492",
+        "TSLA_DEF14A_latest_chunk_281"
+      ],
+      "relevant_tickers": [
+        "TSLA"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "id": "rag_005",
+      "query": "What are Nvidia's primary risk factors as disclosed in their annual report?",
+      "expected_answer": "Nvidia discloses risks including supply chain concentration, competition in AI chips, geopolitical risk, and customer concentration",
+      "relevant_chunk_ids": [
+        "NVDA_10K_2021_chunk_393",
+        "NVDA_10K_2022_chunk_412"
+      ],
+      "relevant_tickers": [
+        "NVDA"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "id": "rag_006",
+      "query": "Compare Apple and Microsoft revenue growth from 2021 to 2023",
+      "expected_answer": "Apple grew from about $365.8B to $383.3B and Microsoft grew from about $168B to $211B.",
+      "relevant_chunk_ids": [
+        "AAPL_DEF14A_latest_chunk_278",
+        "AAPL_DEF14A_latest_chunk_40"
+      ],
+      "relevant_tickers": [
+        "AAPL"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "hard"
+    },
+    {
+      "id": "rag_007",
+      "query": "What was Amazon revenue in 2023?",
+      "expected_answer": "Amazon reported revenue of about $574.8 billion in 2023",
+      "relevant_chunk_ids": [
+        "AMZN_10Q_latest_chunk_109",
+        "AMZN_10K_2021_chunk_412"
+      ],
+      "relevant_tickers": [
+        "AMZN"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "id": "rag_008",
+      "query": "What was JPMorgan net income in 2023?",
+      "expected_answer": "JPMorgan reported net income of about $49.6 billion in 2023",
+      "relevant_chunk_ids": [
+        "JPM_10K_2023_chunk_1335",
+        "JPM_10K_2023_chunk_1152"
+      ],
+      "relevant_tickers": [
+        "JPM"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "id": "rag_009",
+      "query": "What was Johnson & Johnson revenue in 2023?",
+      "expected_answer": "Johnson & Johnson reported revenue of about $85.2 billion in 2023",
+      "relevant_chunk_ids": [
+        "JNJ_10K_2022_chunk_709",
+        "JNJ_10K_2021_chunk_689"
+      ],
+      "relevant_tickers": [
+        "JNJ"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "id": "rag_010",
+      "query": "What was Exxon Mobil net earnings in 2022?",
+      "expected_answer": "Exxon Mobil reported net earnings of about $55.7 billion in 2022",
+      "relevant_chunk_ids": [
+        "XOM_DEF14A_latest_chunk_479",
+        "XOM_DEF14A_latest_chunk_37"
+      ],
+      "relevant_tickers": [
+        "XOM"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2022"
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "id": "rag_011",
+      "query": "What was Walmart revenue in 2023?",
+      "expected_answer": "Walmart reported revenue of about $648.1 billion in 2023",
+      "relevant_chunk_ids": [
+        "WMT_10K_2023_chunk_555",
+        "WMT_10K_2023_chunk_578"
+      ],
+      "relevant_tickers": [
+        "WMT"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "id": "rag_012",
+      "query": "What was Microsoft's revenue in 2023?",
+      "expected_answer": "Microsoft reported revenue of about $211.9 billion in 2023",
+      "relevant_chunk_ids": [
+        "MSFT_DEF14A_latest_chunk_355",
+        "MSFT_DEF14A_latest_chunk_68"
+      ],
+      "relevant_tickers": [
+        "MSFT"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "id": "rag_013",
+      "query": "What did Apple say about supply chain risk in 2023?",
+      "expected_answer": "Apple discussed supplier concentration, manufacturing disruption, and supply chain resilience.",
+      "relevant_chunk_ids": [
+        "AAPL_10K_2023_chunk_267",
+        "AAPL_10K_2022_chunk_131"
+      ],
+      "relevant_tickers": [
+        "AAPL"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "id": "rag_014",
+      "query": "What did Nvidia say about demand for AI chips in 2023?",
+      "expected_answer": "Nvidia described strong AI demand and competitive pressures.",
+      "relevant_chunk_ids": [
+        "NVDA_10K_2022_chunk_434",
+        "NVDA_10K_2022_chunk_481"
+      ],
+      "relevant_tickers": [
+        "NVDA"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "id": "rag_015",
+      "query": "What was Tesla revenue in 2022?",
+      "expected_answer": "Tesla reported revenue of about $81.5 billion in 2022",
+      "relevant_chunk_ids": [
+        "TSLA_10K_2022_chunk_524",
+        "TSLA_DEF14A_latest_chunk_1492"
+      ],
+      "relevant_tickers": [
+        "TSLA"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2022"
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "id": "rag_016",
+      "query": "What was Amazon operating income in 2023?",
+      "expected_answer": "Amazon operating income improved in 2023 versus the prior year.",
+      "relevant_chunk_ids": [
+        "AMZN_10K_2023_chunk_367",
+        "AMZN_10Q_latest_chunk_335"
+      ],
+      "relevant_tickers": [
+        "AMZN"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "id": "rag_017",
+      "query": "What was JPMorgan dividend per share in 2023?",
+      "expected_answer": "JPMorgan paid a dividend per share in 2023 and increased shareholder returns.",
+      "relevant_chunk_ids": [
+        "JPM_10K_2021_chunk_3526",
+        "JPM_10K_2023_chunk_1666"
+      ],
+      "relevant_tickers": [
+        "JPM"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "id": "rag_018",
+      "query": "What was Walmart operating income in 2022?",
+      "expected_answer": "Walmart reported operating income in 2022 with retail margin pressure.",
+      "relevant_chunk_ids": [
+        "WMT_10K_2023_chunk_578",
+        "WMT_10K_2022_chunk_565"
+      ],
+      "relevant_tickers": [
+        "WMT"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2022"
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "id": "rag_019",
+      "query": "What were Exxon Mobil capital expenditures in 2023?",
+      "expected_answer": "Exxon Mobil reported significant capital expenditures in 2023.",
+      "relevant_chunk_ids": [
+        "XOM_10K_2021_chunk_139",
+        "XOM_10K_2022_chunk_152"
+      ],
+      "relevant_tickers": [
+        "XOM"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "id": "rag_020",
+      "query": "What were Johnson & Johnson research and development costs in 2022?",
+      "expected_answer": "Johnson & Johnson incurred substantial R&D costs in 2022.",
+      "relevant_chunk_ids": [
+        "JNJ_10K_2023_chunk_678",
+        "JNJ_10K_2023_chunk_575"
+      ],
+      "relevant_tickers": [
+        "JNJ"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2022"
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "id": "rag_021",
+      "query": "How did Apple gross margin change in 2023?",
+      "expected_answer": "Apple gross margin reflected product mix and services growth.",
+      "relevant_chunk_ids": [
+        "AAPL_10Q_latest_chunk_116",
+        "AAPL_DEF14A_latest_chunk_278"
+      ],
+      "relevant_tickers": [
+        "AAPL"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "hard"
+    },
+    {
+      "id": "rag_022",
+      "query": "How did Microsoft cloud revenue perform in 2023?",
+      "expected_answer": "Microsoft cloud revenue grew in 2023.",
+      "relevant_chunk_ids": [
+        "MSFT_10Q_latest_chunk_393",
+        "MSFT_DEF14A_latest_chunk_68"
+      ],
+      "relevant_tickers": [
+        "MSFT"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "hard"
+    },
+    {
+      "id": "rag_023",
+      "query": "What was Tesla gross margin in 2023?",
+      "expected_answer": "Tesla gross margin declined relative to prior periods.",
+      "relevant_chunk_ids": [
+        "TSLA_DEF14A_latest_chunk_1492",
+        "TSLA_10K_2022_chunk_544"
+      ],
+      "relevant_tickers": [
+        "TSLA"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "hard"
+    },
+    {
+      "id": "rag_024",
+      "query": "What was Nvidia revenue in 2022?",
+      "expected_answer": "Nvidia revenue increased sharply in 2022.",
+      "relevant_chunk_ids": [
+        "NVDA_10K_2022_chunk_581",
+        "NVDA_10K_2021_chunk_577"
+      ],
+      "relevant_tickers": [
+        "NVDA"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2022"
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "id": "rag_025",
+      "query": "What was Amazon revenue in 2022?",
+      "expected_answer": "Amazon reported revenue of about $513.98 billion in 2022",
+      "relevant_chunk_ids": [
+        "AMZN_10Q_latest_chunk_109",
+        "AMZN_DEF14A_latest_chunk_802"
+      ],
+      "relevant_tickers": [
+        "AMZN"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2022"
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "id": "rag_026",
+      "query": "What was JPMorgan revenue in 2022?",
+      "expected_answer": "JPMorgan reported revenue of about $128.7 billion in 2022",
+      "relevant_chunk_ids": [
+        "JPM_10K_2022_chunk_1339",
+        "JPM_10K_2023_chunk_1335"
+      ],
+      "relevant_tickers": [
+        "JPM"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2022"
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "id": "rag_027",
+      "query": "What was Johnson & Johnson revenue in 2022?",
+      "expected_answer": "Johnson & Johnson reported revenue of about $94.9 billion in 2022",
+      "relevant_chunk_ids": [
+        "JNJ_10K_2022_chunk_709",
+        "JNJ_10K_2021_chunk_689"
+      ],
+      "relevant_tickers": [
+        "JNJ"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2022"
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "id": "rag_028",
+      "query": "What was Exxon Mobil net earnings in 2023?",
+      "expected_answer": "Exxon Mobil reported net earnings in 2023",
+      "relevant_chunk_ids": [
+        "XOM_DEF14A_latest_chunk_37",
+        "XOM_DEF14A_latest_chunk_479"
+      ],
+      "relevant_tickers": [
+        "XOM"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "id": "rag_029",
+      "query": "What was Walmart revenue in 2022?",
+      "expected_answer": "Walmart reported revenue in 2022",
+      "relevant_chunk_ids": [
+        "WMT_10K_2023_chunk_578",
+        "WMT_10K_2022_chunk_959"
+      ],
+      "relevant_tickers": [
+        "WMT"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2022"
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "id": "rag_030",
+      "query": "What was Nvidia revenue in 2023?",
+      "expected_answer": "Nvidia reported revenue in 2023",
+      "relevant_chunk_ids": [
+        "NVDA_10K_2022_chunk_581",
+        "NVDA_10K_2021_chunk_577"
+      ],
+      "relevant_tickers": [
+        "NVDA"
+      ],
+      "relevant_filing_types": [
+        "10K"
+      ],
+      "relevant_years": [
+        "2023"
+      ],
+      "difficulty": "easy"
+    }
+  ]
+}

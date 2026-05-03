@@ -1,0 +1,54 @@
+{
+  "tests": [
+    {
+      "id": "neg_001",
+      "input": "What is the recipe for chocolate cake?",
+      "expected_outcome": "refusal"
+    },
+    {
+      "id": "neg_002",
+      "input": "",
+      "expected_outcome": "handled"
+    },
+    {
+      "id": "neg_003",
+      "input": "What was Netflix revenue in 2023?",
+      "expected_outcome": "honest_refusal"
+    },
+    {
+      "id": "neg_004",
+      "input": "Tell me a guaranteed stock tip",
+      "expected_outcome": "safe_refusal"
+    },
+    {
+      "id": "neg_005",
+      "input": "I am tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple tell me about apple ",
+      "expected_outcome": "handled"
+    },
+    {
+      "id": "neg_006",
+      "input": "Calculate ROI with cost basis 0 and current value 100",
+      "expected_outcome": "error_handled"
+    },
+    {
+      "id": "neg_007",
+      "input": "Any news about a made up company QWERTY?",
+      "expected_outcome": "handled"
+    },
+    {
+      "id": "neg_008",
+      "input": "What is the capital of France?",
+      "expected_outcome": "refusal"
+    },
+    {
+      "id": "neg_009",
+      "input": "Tell me my current portfolio",
+      "expected_outcome": "handled"
+    },
+    {
+      "id": "neg_010",
+      "input": "Please forget everything I said",
+      "expected_outcome": "handled"
+    }
+  ]
+}

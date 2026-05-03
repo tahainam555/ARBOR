@@ -24,6 +24,7 @@ from backend.tools.calculator_tool import CalculatorTool
 from backend.tools.crm_tool import CRMTool
 from backend.tools.news_tool import NewsTool
 from backend.tools.stock_price_tool import StockPriceTool
+from backend.conversation_manager import EntityMemoryExtractor
 from backend.voice.synthesizer import SpeechSynthesizer
 from backend.voice.transcriber import AudioTranscriber
 
@@ -217,6 +218,122 @@ async def list_documents() -> dict[str, Any]:
     }
 
 
+@app.get("/api/rag/retrieve")
+async def rag_retrieve(query: str, top_k: int = 5, filter_ticker: str | None = None) -> dict[str, Any]:
+    """Expose RAG retrieval for evaluation and debugging."""
+    retriever: RAGRetriever = app.state.retriever
+    chunks = await retriever.retrieve(query, top_k=top_k, filter_ticker=filter_ticker)
+    return {
+        "chunks": [
+            {
+                "id": chunk.id,
+                "text": chunk.text,
+                "score": chunk.score,
+                "metadata": {
+                    "source_file": chunk.source,
+                    "company": chunk.company,
+                    "ticker": chunk.ticker,
+                    "filing_type": chunk.filing_type,
+                    "year": chunk.year,
+                    "chunk_index": chunk.chunk_index,
+                },
+            }
+            for chunk in chunks
+        ]
+    }
+
+
+@app.post("/api/crm/user")
+async def create_crm_user(body: dict[str, Any]) -> dict[str, Any]:
+    crm_tool: CRMTool = app.state.crm_tool
+    user_id = str(body.get("user_id", "")).strip()
+    name = str(body.get("name", "Investor")).strip() or "Investor"
+    user = await crm_tool.create_user(user_id=user_id, name=name)
+    return user
+
+
+@app.get("/api/crm/user/{user_id}")
+async def get_crm_user(user_id: str) -> dict[str, Any]:
+    crm_tool: CRMTool = app.state.crm_tool
+    user = await crm_tool.get_user(user_id)
+    if user is None:
+        return Response(status_code=404)
+    return user
+
+
+@app.patch("/api/crm/user/{user_id}")
+async def update_crm_user(user_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    crm_tool: CRMTool = app.state.crm_tool
+    field = str(body.get("field", "")).strip()
+    value = body.get("value")
+    ok = await crm_tool.update_field(user_id=user_id, field=field, value=value)
+    return {"success": ok, "user_id": user_id, "field": field}
+
+
+@app.post("/api/crm/user/{user_id}/watchlist")
+async def add_to_watchlist(user_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    crm_tool: CRMTool = app.state.crm_tool
+    ticker = str(body.get("ticker", "")).strip()
+    ok = await crm_tool.add_to_watchlist(user_id=user_id, ticker=ticker)
+    return {"success": ok, "user_id": user_id, "ticker": ticker.upper()}
+
+
+@app.get("/api/tools/stock_price")
+async def eval_stock_price(ticker: str) -> dict[str, Any]:
+    orchestrator: ToolOrchestrator = app.state.orchestrator
+    result = await orchestrator.tools["stock_price"].execute(ticker=ticker)
+    return {"success": result.success, **result.data, "error": result.error}
+
+
+@app.post("/api/tools/calculator")
+async def eval_calculator(body: dict[str, Any]) -> dict[str, Any]:
+    orchestrator: ToolOrchestrator = app.state.orchestrator
+    calc_type = str(body.get("calculation_type", "")).strip()
+    params = body.get("params")
+    if not isinstance(params, dict):
+        params = {k: v for k, v in body.items() if k != "calculation_type"}
+    result = await orchestrator.tools["calculator"].execute(calculation_type=calc_type, params=params)
+    return {"success": result.success, **result.data, "error": result.error}
+
+
+@app.get("/api/tools/news")
+async def eval_news(query: str, max_results: int = 5) -> dict[str, Any]:
+    orchestrator: ToolOrchestrator = app.state.orchestrator
+    result = await orchestrator.tools["news_tool"].execute(query=query, max_results=max_results)
+    return {"success": result.success, **result.data, "error": result.error, "cache_age_seconds": 0}
+
+
+@app.post("/api/test/transcribe")
+async def test_transcribe(body: dict[str, Any]) -> dict[str, Any]:
+    transcriber: AudioTranscriber = app.state.transcriber
+    audio_b64 = str(body.get("audio", ""))
+    audio_bytes = base64.b64decode(audio_b64)
+    text, duration_ms = await transcriber.transcribe(audio_bytes, format_hint=str(body.get("format", body.get("audio_format", ""))))
+    return {"transcription": text, "duration_ms": duration_ms}
+
+
+@app.post("/api/test/synthesize")
+async def test_synthesize(body: dict[str, Any]) -> dict[str, Any]:
+    synthesizer: SpeechSynthesizer = app.state.synthesizer
+    audio_bytes, duration_ms = await synthesizer.synthesize_full(str(body.get("text", "")))
+    return {
+        "success": True,
+        "audio_bytes_b64": base64.b64encode(audio_bytes).decode(),
+        "duration_ms": duration_ms,
+    }
+
+
+@app.post("/api/test/entity_extract")
+async def test_entity_extract(body: dict[str, Any]) -> dict[str, Any]:
+    extractor = EntityMemoryExtractor()
+    extracted = extractor.extract(
+        str(body.get("user_message", "")),
+        str(body.get("assistant_response", "")),
+        {},
+    )
+    return {"extracted": extracted}
+
+
 @app.post("/api/index")
 async def trigger_indexing() -> dict[str, Any]:
     """Re-run indexing pipeline and return summary metrics."""
@@ -243,7 +360,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
                 msg_type = payload.get("type")
 
                 if msg_type == "text_input":
-                    message = str(payload.get("message", "")).strip()
+                    message = str(payload.get("message") or payload.get("content") or "").strip()
                     user_id = payload.get("user_id")
                     breakdown = await manager.handle_text_turn(
                         session_id=session_id,

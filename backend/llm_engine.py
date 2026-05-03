@@ -40,7 +40,7 @@ class LLMEngine:
         return cls._instance
 
     def _trim_prompt_to_context(self, prompt: str, reserved_output_tokens: int | None = None) -> str:
-        """Ensure prompt tokens fit model context by trimming oldest prefix content."""
+        """Ensure prompt fits context while preserving both instruction and latest user text."""
         if reserved_output_tokens is None:
             reserved_output_tokens = self.settings.llm_prompt_reserve_tokens
         max_prompt_tokens = max(256, self.settings.n_ctx - reserved_output_tokens)
@@ -48,7 +48,16 @@ class LLMEngine:
         if len(prompt_tokens) <= max_prompt_tokens:
             return prompt
 
-        trimmed_tokens = prompt_tokens[-max_prompt_tokens:]
+        # Keep both the prompt prefix (system + retrieved context) and suffix (latest user turn).
+        # This avoids dropping the RAG context when n_ctx is small.
+        prefix_ratio = 0.6
+        prefix_count = max(64, int(max_prompt_tokens * prefix_ratio))
+        suffix_count = max_prompt_tokens - prefix_count
+        if suffix_count < 64:
+            suffix_count = 64
+            prefix_count = max_prompt_tokens - suffix_count
+
+        trimmed_tokens = prompt_tokens[:prefix_count] + prompt_tokens[-suffix_count:]
         trimmed = self.model.detokenize(trimmed_tokens).decode("utf-8", errors="ignore")
         return trimmed
 

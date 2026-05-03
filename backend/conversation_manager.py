@@ -343,6 +343,27 @@ class ConversationManager:
             return text
         return " ".join(words[-max_words:])
 
+    @staticmethod
+    def _build_sources_footer(chunks: list[RetrievedChunk], max_sources: int = 3) -> str:
+        """Create a compact, deterministic citation footer from retrieved chunks."""
+        if not chunks:
+            return ""
+
+        unique_sources: list[str] = []
+        seen: set[str] = set()
+        for chunk in chunks:
+            source = f"{chunk.ticker} {chunk.filing_type} {chunk.year} ({chunk.source})"
+            if source in seen:
+                continue
+            seen.add(source)
+            unique_sources.append(source)
+            if len(unique_sources) >= max_sources:
+                break
+
+        if not unique_sources:
+            return ""
+        return "\n\nSources: " + "; ".join(unique_sources)
+
     async def _load_crm_context(self, session: ConversationSession) -> str:
         if not session.user_id:
             return "No user profile loaded."
@@ -427,9 +448,21 @@ class ConversationManager:
         session_id: str,
         turn_id: int,
         message: str,
+        websocket: Any | None = None,
     ) -> tuple[str, dict[str, Any]]:
         async with self.latency_tracker.measure(session_id, turn_id, "tool_detection"):
             tool_result = await self.tool_orchestrator.detect_and_execute(message=message, session_id=session_id)
+
+        if websocket is not None:
+            for detection in getattr(tool_result, "detections", []):
+                await websocket.send_json(
+                    {
+                        "type": "tool_call",
+                        "tool_name": detection.get("tool"),
+                        "args": detection.get("params", {}),
+                        "turn_id": turn_id,
+                    }
+                )
 
         for tool_name, result in tool_result.results.items():
             await self.latency_tracker.log(
@@ -567,7 +600,7 @@ class ConversationManager:
 
         crm_task = asyncio.create_task(self._load_crm_context(session))
         retrieval_task = asyncio.create_task(self._retrieve_chunks(session_id, turn_id, message))
-        tools_task = asyncio.create_task(self._run_tools(session_id, turn_id, message))
+        tools_task = asyncio.create_task(self._run_tools(session_id, turn_id, message, websocket=websocket))
 
         crm_context, chunks, tool_result = await asyncio.gather(crm_task, retrieval_task, tools_task)
         rag_context = await self.retriever.format_context(chunks)
@@ -588,6 +621,7 @@ class ConversationManager:
             turn_id=turn_id,
             latency_tracker=self.latency_tracker,
         )
+        assistant_text = (assistant_text + self._build_sources_footer(chunks)).strip()
 
         if speak_response:
             await self.synthesizer.synthesize_streaming(assistant_text, websocket, turn_id=turn_id)
@@ -635,7 +669,7 @@ class ConversationManager:
 
         crm_task = asyncio.create_task(self._load_crm_context(session))
         retrieval_task = asyncio.create_task(self._retrieve_chunks(session_id, turn_id, user_text))
-        tools_task = asyncio.create_task(self._run_tools(session_id, turn_id, user_text))
+        tools_task = asyncio.create_task(self._run_tools(session_id, turn_id, user_text, websocket=websocket))
 
         crm_context, chunks, tool_result = await asyncio.gather(crm_task, retrieval_task, tools_task)
         rag_context = await self.retriever.format_context(chunks)
@@ -688,6 +722,8 @@ class ConversationManager:
             f"BUG: TTS is about to synthesize user input '{user_text[:50]}' instead of assistant response"
         )
         assert len(assistant_text) > 0, "BUG: Empty assistant response passed to TTS"
+
+        assistant_text = (assistant_text + self._build_sources_footer(chunks)).strip()
 
         return await self._finalize_turn(
             session=session,

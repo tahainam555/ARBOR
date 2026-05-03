@@ -1,0 +1,273 @@
+{
+  "version": "1.0",
+  "dialogues": [
+    {
+      "id": "conv_001",
+      "name": "Basic SEC Research",
+      "description": "Straightforward financial questions",
+      "turns": [
+        {
+          "role": "user",
+          "content": "What was Apple's total revenue in fiscal year 2023?"
+        },
+        {
+          "role": "user",
+          "content": "How does that compare to 2022?"
+        },
+        {
+          "role": "user",
+          "content": "What about Microsoft's revenue in 2023?"
+        }
+      ],
+      "rubric": {
+        "task_completion": "Provide figures for all questions",
+        "factual_accuracy": "Figures should match filings",
+        "source_citation": "Must cite filing source",
+        "coherence": "Must connect follow-up answers"
+      },
+      "expected_task_completion": true
+    },
+    {
+      "id": "conv_002",
+      "name": "Memory Persistence Test",
+      "description": "Personal info then later recall",
+      "turns": [
+        {
+          "role": "user",
+          "content": "Hi my name is Sarah and I am a conservative investor focused on dividend stocks"
+        },
+        {
+          "role": "user",
+          "content": "What was JPMorgan's dividend per share in 2023?"
+        },
+        {
+          "role": "user",
+          "content": "Given my investment style what other companies should I look at?"
+        },
+        {
+          "role": "user",
+          "content": "What is my name and what kind of investor am I?"
+        }
+      ],
+      "rubric": {
+        "memory": "Remember name and profile",
+        "personalization": "Recommendations should fit the profile",
+        "task_completion": "Must answer the dividend question"
+      },
+      "expected_task_completion": true
+    },
+    {
+      "id": "conv_003",
+      "name": "Tool Chaining",
+      "description": "RAG plus tools in same session",
+      "turns": [
+        {
+          "role": "user",
+          "content": "What was Tesla revenue in their 2023 annual report?"
+        },
+        {
+          "role": "user",
+          "content": "What is Tesla trading at right now?"
+        },
+        {
+          "role": "user",
+          "content": "If Tesla was at 150 when I bought it what is my ROI at the current price?"
+        }
+      ],
+      "rubric": {
+        "rag_use": "Use filings, not hallucination",
+        "tool_use": "Must call stock_price",
+        "tool_chaining": "Use current price in calculator",
+        "coherence": "Stay coherent"
+      },
+      "expected_task_completion": true
+    },
+    {
+      "id": "conv_004",
+      "name": "Out of Scope Rejection",
+      "description": "Non-investment requests",
+      "turns": [
+        {
+          "role": "user",
+          "content": "What is the capital of France?"
+        },
+        {
+          "role": "user",
+          "content": "Write me a poem about stocks"
+        },
+        {
+          "role": "user",
+          "content": "What should I cook for dinner tonight?"
+        }
+      ],
+      "rubric": {
+        "policy_adherence": "Redirect to investment research",
+        "tone": "Polite",
+        "no_hallucination": "Do not answer out of scope"
+      },
+      "expected_task_completion": false,
+      "expected_policy_adherence": true
+    },
+    {
+      "id": "conv_005",
+      "name": "Company Not In Corpus",
+      "description": "Asks about missing companies",
+      "turns": [
+        {
+          "role": "user",
+          "content": "What was Netflix revenue in 2023?"
+        },
+        {
+          "role": "user",
+          "content": "Can you tell me about Meta financial results?"
+        }
+      ],
+      "rubric": {
+        "honesty": "State the company is not indexed",
+        "no_hallucination": "Do not invent figures",
+        "helpfulness": "Offer covered companies"
+      },
+      "expected_task_completion": false,
+      "expected_honest_refusal": true
+    },
+    {
+      "id": "conv_006",
+      "name": "Ambiguous Query Resolution",
+      "description": "Resolve descriptive company names",
+      "turns": [
+        {
+          "role": "user",
+          "content": "Tell me about the electric car company financials"
+        },
+        {
+          "role": "user",
+          "content": "What about the search engine giant?"
+        },
+        {
+          "role": "user",
+          "content": "How about the online retailer that also does cloud computing?"
+        }
+      ],
+      "rubric": {
+        "disambiguation": "Resolve to TSLA, GOOGL, AMZN",
+        "clarification": "Ask if uncertain",
+        "accuracy": "Use correct filings"
+      },
+      "expected_task_completion": true
+    },
+    {
+      "id": "conv_007",
+      "name": "Multi-Year Trend Analysis",
+      "description": "Trend analysis across years",
+      "turns": [
+        {
+          "role": "user",
+          "content": "Show me Nvidia revenue for 2021 2022 and 2023"
+        },
+        {
+          "role": "user",
+          "content": "What is the year over year growth rate?"
+        },
+        {
+          "role": "user",
+          "content": "Based on this trend what concerns might an investor have?"
+        }
+      ],
+      "rubric": {
+        "multi_doc_retrieval": "Retrieve multiple annual reports",
+        "calculation": "Growth rates correct",
+        "analysis_quality": "Provide substantive analysis"
+      },
+      "expected_task_completion": true
+    },
+    {
+      "id": "conv_008",
+      "name": "CRM Profile Building",
+      "description": "Build and use complete user profile",
+      "turns": [
+        {
+          "role": "user",
+          "content": "My name is James Chen and I want to focus on tech stocks"
+        },
+        {
+          "role": "user",
+          "content": "I have a moderate risk tolerance and 10 year investment horizon"
+        },
+        {
+          "role": "user",
+          "content": "Add Apple Microsoft and Nvidia to my watchlist"
+        },
+        {
+          "role": "user",
+          "content": "Based on my profile which of these three should I research first?"
+        }
+      ],
+      "rubric": {
+        "crm_write": "Trigger CRM updates",
+        "crm_read": "Read stored profile",
+        "personalization": "Recommendation must align"
+      },
+      "expected_task_completion": true
+    },
+    {
+      "id": "conv_009",
+      "name": "Contradictory Information Handling",
+      "description": "Latest statement should win",
+      "turns": [
+        {
+          "role": "user",
+          "content": "I am an aggressive investor who loves high risk"
+        },
+        {
+          "role": "user",
+          "content": "Actually I changed my mind I am very conservative"
+        },
+        {
+          "role": "user",
+          "content": "What is my investment profile?"
+        }
+      ],
+      "rubric": {
+        "memory_update": "Use the latest profile",
+        "no_contradiction": "Do not state both",
+        "crm_update": "Overwrite CRM profile"
+      },
+      "expected_task_completion": true
+    },
+    {
+      "id": "conv_010",
+      "name": "Full Pipeline Integration",
+      "description": "RAG plus tool plus memory plus news",
+      "turns": [
+        {
+          "role": "user",
+          "content": "I am Ahmed an aggressive investor watching JPM and NVDA"
+        },
+        {
+          "role": "user",
+          "content": "What was JPMorgan net income in 2023 from their annual report?"
+        },
+        {
+          "role": "user",
+          "content": "What is JPM trading at right now?"
+        },
+        {
+          "role": "user",
+          "content": "Any recent news about JPMorgan?"
+        },
+        {
+          "role": "user",
+          "content": "Based on everything we discussed would this be a good buy for someone like me?"
+        }
+      ],
+      "rubric": {
+        "memory": "Remember the user profile",
+        "rag": "Use filing data",
+        "stock_tool": "Call stock_price",
+        "news_tool": "Call news_tool",
+        "synthesis": "Synthesize coherently"
+      },
+      "expected_task_completion": true
+    }
+  ]
+}

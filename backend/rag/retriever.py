@@ -15,12 +15,14 @@ from backend.config import get_settings
 class RetrievedChunk:
     """Retrieved context chunk with source metadata and distance score."""
 
+    id: str
     text: str
     source: str
     ticker: str
     company: str
     filing_type: str
     year: str
+    chunk_index: int
     score: float
 
 
@@ -85,14 +87,20 @@ class RAGRetriever:
         for idx, text in enumerate(docs):
             meta = metadatas[idx] if idx < len(metadatas) else {}
             distance = float(distances[idx]) if idx < len(distances) else 0.0
+            ticker = str(meta.get("ticker", "unknown"))
+            filing_type = str(meta.get("filing_type", "unknown"))
+            year = str(meta.get("year", "unknown"))
+            chunk_index = int(meta.get("chunk_index", -1))
             chunks.append(
                 RetrievedChunk(
+                    id=f"{ticker}_{filing_type.replace('-', '').replace(' ', '')}_{year}_chunk_{chunk_index}",
                     text=text,
                     source=str(meta.get("source_file", "unknown")),
-                    ticker=str(meta.get("ticker", "unknown")),
+                    ticker=ticker,
                     company=str(meta.get("company", "unknown")),
-                    filing_type=str(meta.get("filing_type", "unknown")),
-                    year=str(meta.get("year", "unknown")),
+                    filing_type=filing_type,
+                    year=year,
+                    chunk_index=chunk_index,
                     score=distance,
                 )
             )

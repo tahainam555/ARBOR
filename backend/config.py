@@ -21,11 +21,11 @@ class Settings(BaseSettings):
 
     # LLM
     llm_model_path: str = Field(
-        default="./models/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+        default="./models/tiny-llama-miniguanaco-1.5t.q2_k.gguf",
         alias="LLM_MODEL_PATH",
     )
-    n_threads: int = Field(default=8, alias="N_THREADS")
-    n_ctx: int = Field(default=2048, alias="N_CTX")
+    n_threads: int = Field(default=4, alias="N_THREADS")
+    n_ctx: int = Field(default=1024, alias="N_CTX")
 
     # Paths
     chroma_path: str = Field(default="./chroma_db", alias="CHROMA_PATH")
@@ -47,9 +47,9 @@ class Settings(BaseSettings):
     max_sessions: int = Field(default=50, alias="MAX_SESSIONS")
 
     # Generation
-    llm_stream_max_tokens: int = Field(default=72, alias="LLM_STREAM_MAX_TOKENS")
-    llm_tool_max_tokens: int = Field(default=24, alias="LLM_TOOL_MAX_TOKENS")
-    llm_prompt_reserve_tokens: int = Field(default=128, alias="LLM_PROMPT_RESERVE_TOKENS")
+    llm_stream_max_tokens: int = Field(default=128, alias="LLM_STREAM_MAX_TOKENS")
+    llm_tool_max_tokens: int = Field(default=48, alias="LLM_TOOL_MAX_TOKENS")
+    llm_prompt_reserve_tokens: int = Field(default=256, alias="LLM_PROMPT_RESERVE_TOKENS")
 
     # Logging
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")

@@ -1,0 +1,287 @@
+{
+  "version": "1.0",
+  "tests": [
+    {
+      "id": "tool_crm_001",
+      "utterance": "Hi, my name is Ahmed and I am an aggressive investor",
+      "expected_tool": "crm_tool",
+      "expected_action": "update_field",
+      "expected_args": {
+        "field": "name",
+        "value": "Ahmed"
+      },
+      "should_also_extract": {
+        "field": "risk_profile",
+        "value": "aggressive"
+      },
+      "should_not_call": [
+        "stock_price",
+        "calculator",
+        "news_tool"
+      ]
+    },
+    {
+      "id": "tool_crm_002",
+      "utterance": "Please add Tesla to my watchlist",
+      "expected_tool": "crm_tool",
+      "expected_action": "add_to_watchlist",
+      "expected_args": {
+        "action": "add_to_watchlist",
+        "ticker": "TSLA"
+      },
+      "should_not_call": [
+        "stock_price",
+        "calculator",
+        "news_tool"
+      ]
+    },
+    {
+      "id": "tool_stock_001",
+      "utterance": "What is Apple trading at right now?",
+      "expected_tool": "stock_price",
+      "expected_args": {
+        "ticker": "AAPL"
+      },
+      "should_not_call": [
+        "crm_tool",
+        "calculator",
+        "news_tool"
+      ]
+    },
+    {
+      "id": "tool_stock_002",
+      "utterance": "Show me Nvidia current stock price and PE ratio",
+      "expected_tool": "stock_price",
+      "expected_args": {
+        "ticker": "NVDA"
+      },
+      "should_not_call": [
+        "crm_tool",
+        "calculator",
+        "news_tool"
+      ]
+    },
+    {
+      "id": "tool_calc_001",
+      "utterance": "If I bought Tesla at 150 dollars and it is now at 248 dollars what is my ROI?",
+      "expected_tool": "calculator",
+      "expected_args": {
+        "calculation_type": "roi",
+        "params": {
+          "cost_basis": 150,
+          "current_value": 248
+        }
+      },
+      "should_not_call": [
+        "crm_tool",
+        "stock_price",
+        "news_tool"
+      ]
+    },
+    {
+      "id": "tool_calc_002",
+      "utterance": "If I invest 10000 dollars at 12 percent annual return for 5 years what will I have?",
+      "expected_tool": "calculator",
+      "expected_args": {
+        "calculation_type": "compound_interest",
+        "params": {
+          "principal": 10000,
+          "rate_pct": 12,
+          "years": 5
+        }
+      },
+      "should_not_call": [
+        "crm_tool",
+        "stock_price",
+        "news_tool"
+      ]
+    },
+    {
+      "id": "tool_news_001",
+      "utterance": "Any recent news about Microsoft?",
+      "expected_tool": "news_tool",
+      "expected_args": {
+        "query": "Microsoft"
+      },
+      "should_not_call": [
+        "crm_tool",
+        "calculator"
+      ]
+    },
+    {
+      "id": "tool_none_001",
+      "utterance": "What was Apple revenue in 2023?",
+      "expected_tool": null,
+      "expected_rag": true,
+      "should_not_call": [
+        "crm_tool",
+        "stock_price",
+        "calculator",
+        "news_tool"
+      ]
+    },
+    {
+      "id": "tool_none_002",
+      "utterance": "Hello how are you today?",
+      "expected_tool": null,
+      "expected_rag": false,
+      "should_not_call": [
+        "crm_tool",
+        "stock_price",
+        "calculator",
+        "news_tool"
+      ]
+    },
+    {
+      "id": "tool_stock_003",
+      "utterance": "What is the current price of JPMorgan?",
+      "expected_tool": "stock_price",
+      "expected_args": {
+        "ticker": "JPM"
+      },
+      "should_not_call": [
+        "crm_tool",
+        "calculator",
+        "news_tool"
+      ]
+    },
+    {
+      "id": "tool_stock_004",
+      "utterance": "What is Walmart stock price now?",
+      "expected_tool": "stock_price",
+      "expected_args": {
+        "ticker": "WMT"
+      },
+      "should_not_call": [
+        "crm_tool",
+        "calculator",
+        "news_tool"
+      ]
+    },
+    {
+      "id": "tool_calc_003",
+      "utterance": "Compute CAGR from 100 to 200 over 5 years",
+      "expected_tool": "calculator",
+      "expected_args": {
+        "calculation_type": "cagr",
+        "params": {
+          "start_value": 100,
+          "end_value": 200,
+          "years": 5
+        }
+      },
+      "should_not_call": [
+        "crm_tool",
+        "stock_price",
+        "news_tool"
+      ]
+    },
+    {
+      "id": "tool_news_002",
+      "utterance": "Recent news about Nvidia please",
+      "expected_tool": "news_tool",
+      "expected_args": {
+        "query": "NVDA"
+      },
+      "should_not_call": [
+        "crm_tool",
+        "calculator"
+      ]
+    },
+    {
+      "id": "tool_crm_003",
+      "utterance": "My risk tolerance is conservative and I watch AAPL and MSFT",
+      "expected_tool": "crm_tool",
+      "expected_action": "update_field",
+      "expected_args": {
+        "field": "risk_profile",
+        "value": "conservative"
+      },
+      "should_not_call": [
+        "stock_price",
+        "calculator",
+        "news_tool"
+      ]
+    },
+    {
+      "id": "tool_crm_004",
+      "utterance": "I own 100 shares of Apple",
+      "expected_tool": "crm_tool",
+      "expected_action": "update_field",
+      "expected_args": {
+        "field": "portfolio"
+      },
+      "should_not_call": [
+        "stock_price",
+        "calculator",
+        "news_tool"
+      ]
+    },
+    {
+      "id": "tool_stock_005",
+      "utterance": "Tell me Tesla stock price and PE ratio",
+      "expected_tool": "stock_price",
+      "expected_args": {
+        "ticker": "TSLA"
+      },
+      "should_not_call": [
+        "crm_tool",
+        "calculator",
+        "news_tool"
+      ]
+    },
+    {
+      "id": "tool_calc_004",
+      "utterance": "What is dividend yield if annual dividend is 4 and stock price is 200?",
+      "expected_tool": "calculator",
+      "expected_args": {
+        "calculation_type": "dividend_yield",
+        "params": {
+          "annual_dividend": 4,
+          "stock_price": 200
+        }
+      },
+      "should_not_call": [
+        "crm_tool",
+        "stock_price",
+        "news_tool"
+      ]
+    },
+    {
+      "id": "tool_news_003",
+      "utterance": "Any latest headlines for Amazon?",
+      "expected_tool": "news_tool",
+      "expected_args": {
+        "query": "AMZN"
+      },
+      "should_not_call": [
+        "crm_tool",
+        "calculator"
+      ]
+    },
+    {
+      "id": "tool_none_003",
+      "utterance": "Explain the concept of compounding in one sentence.",
+      "expected_tool": null,
+      "expected_rag": false,
+      "should_not_call": [
+        "crm_tool",
+        "stock_price",
+        "calculator",
+        "news_tool"
+      ]
+    },
+    {
+      "id": "tool_none_004",
+      "utterance": "What was the revenue of Netflix in 2023?",
+      "expected_tool": null,
+      "expected_rag": true,
+      "should_not_call": [
+        "crm_tool",
+        "stock_price",
+        "calculator",
+        "news_tool"
+      ]
+    }
+  ]
+}
